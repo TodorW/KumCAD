@@ -1,0 +1,60 @@
+#include "core/geometry/Arc.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace lcad {
+
+namespace {
+
+constexpr double kTwoPi = 2.0 * M_PI;
+
+double normalizeAngle(double angle) {
+    angle = std::fmod(angle, kTwoPi);
+    if (angle < 0) angle += kTwoPi;
+    return angle;
+}
+
+} // namespace
+
+Point2D ArcEntity::startPoint() const {
+    return {m_center.x + m_radius * std::cos(m_startAngle), m_center.y + m_radius * std::sin(m_startAngle)};
+}
+
+Point2D ArcEntity::endPoint() const {
+    return {m_center.x + m_radius * std::cos(m_endAngle), m_center.y + m_radius * std::sin(m_endAngle)};
+}
+
+bool ArcEntity::angleInSweep(double angle) const {
+    const double a = normalizeAngle(angle);
+    const double start = normalizeAngle(m_startAngle);
+    const double end = normalizeAngle(m_endAngle);
+    if (start <= end) return a >= start && a <= end;
+    return a >= start || a <= end; // sweep wraps past 0
+}
+
+BoundingBox ArcEntity::boundingBox() const {
+    BoundingBox box;
+    box.expand(startPoint());
+    box.expand(endPoint());
+    box.expand(m_center); // conservative: keeps the box sane for degenerate/zero-length arcs
+    // Cardinal points are where the arc extends furthest from the chord.
+    for (double angle : {0.0, M_PI / 2, M_PI, 3 * M_PI / 2}) {
+        if (angleInSweep(angle)) {
+            box.expand(Point2D(m_center.x + m_radius * std::cos(angle), m_center.y + m_radius * std::sin(angle)));
+        }
+    }
+    return box;
+}
+
+double ArcEntity::distanceTo(const Point2D& pt) const {
+    const double angle = std::atan2(pt.y - m_center.y, pt.x - m_center.x);
+    if (angleInSweep(angle)) return std::abs(pt.distanceTo(m_center) - m_radius);
+    return std::min(pt.distanceTo(startPoint()), pt.distanceTo(endPoint()));
+}
+
+std::unique_ptr<Entity> ArcEntity::clone() const {
+    return std::make_unique<ArcEntity>(*this);
+}
+
+} // namespace lcad

@@ -1,0 +1,40 @@
+#pragma once
+
+#include "core/Ids.h"
+#include "core/geometry/BoundingBox.h"
+#include "core/geometry/Point2D.h"
+
+#include <memory>
+
+namespace lcad {
+
+enum class EntityType {
+    Line,
+    Circle,
+    Arc,
+    Polyline,
+};
+
+class Entity {
+public:
+    Entity(EntityId id, LayerId layer) : m_id(id), m_layer(layer) {}
+    virtual ~Entity() = default;
+
+    EntityId id() const { return m_id; }
+    LayerId layer() const { return m_layer; }
+    void setLayer(LayerId layer) { m_layer = layer; }
+
+    virtual EntityType type() const = 0;
+    virtual BoundingBox boundingBox() const = 0;
+
+    // Shortest distance from pt to this entity, used for click picking.
+    virtual double distanceTo(const Point2D& pt) const = 0;
+
+    virtual std::unique_ptr<Entity> clone() const = 0;
+
+private:
+    EntityId m_id;
+    LayerId m_layer;
+};
+
+} // namespace lcad

@@ -66,4 +66,19 @@ std::vector<const Entity*> Document::entities() const {
     return result;
 }
 
+const BlockDefinition* Document::addBlock(std::string name, std::vector<std::unique_ptr<Entity>> entities) {
+    auto block = std::make_unique<BlockDefinition>();
+    block->name = std::move(name);
+    block->entities = std::move(entities);
+    m_blocks.push_back(std::move(block));
+    return m_blocks.back().get();
+}
+
+const BlockDefinition* Document::findBlock(const std::string& name) const {
+    for (const auto& block : m_blocks) {
+        if (block->name == name) return block.get();
+    }
+    return nullptr;
+}
+
 } // namespace lcad

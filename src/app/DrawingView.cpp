@@ -1,6 +1,7 @@
 #include "DrawingView.h"
 
 #include "CommandDispatcher.h"
+#include "EntityPainter.h"
 #include "core/document/Commands.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
@@ -193,6 +194,8 @@ void DrawingView::paintEvent(QPaintEvent*) {
         } else if (hovered) {
             color = kHoverColor;
             width = 2.0;
+        } else if (const auto& override = e->colorOverride()) {
+            color = QColor(override->r, override->g, override->b);
         } else {
             color = layer ? QColor(layer->color.r, layer->color.g, layer->color.b) : QColor(255, 255, 255);
         }
@@ -249,123 +252,8 @@ void DrawingView::drawGrid(QPainter& painter) {
 }
 
 void DrawingView::drawEntity(QPainter& painter, const lcad::Entity& entity, const QColor& color, double penWidth) {
-    painter.setPen(QPen(color, penWidth));
-
-    switch (entity.type()) {
-    case lcad::EntityType::Line: {
-        const auto& line = static_cast<const lcad::LineEntity&>(entity);
-        painter.drawLine(worldToScreen(line.start()), worldToScreen(line.end()));
-        break;
-    }
-    case lcad::EntityType::Circle: {
-        const auto& circle = static_cast<const lcad::CircleEntity&>(entity);
-        const QPointF c = worldToScreen(circle.center());
-        const double r = circle.radius() * m_scale;
-        painter.drawEllipse(c, r, r);
-        break;
-    }
-    case lcad::EntityType::Arc: {
-        const auto& arc = static_cast<const lcad::ArcEntity&>(entity);
-        const QPointF c = worldToScreen(arc.center());
-        const double r = arc.radius() * m_scale;
-        const QRectF bounds(c.x() - r, c.y() - r, 2 * r, 2 * r);
-
-        auto normalize = [](double a) {
-            a = std::fmod(a, 2 * M_PI);
-            if (a < 0) a += 2 * M_PI;
-            return a;
-        };
-        const double ns = normalize(arc.startAngle());
-        const double ne = normalize(arc.endAngle());
-        double sweep = ne - ns;
-        if (sweep <= 0) sweep += 2 * M_PI;
-
-        // QPainter::drawArc's angle convention is defined visually (0 = visually
-        // right/3 o'clock, positive = visually CCW toward 12 o'clock), same as our
-        // world angle convention once world points are Y-flipped into screen space
-        // by worldToScreen() -- so no extra sign flip is needed here.
-        const double startDeg = qRadiansToDegrees(arc.startAngle());
-        const double spanDeg = qRadiansToDegrees(sweep);
-        painter.drawArc(bounds, static_cast<int>(startDeg * 16), static_cast<int>(spanDeg * 16));
-        break;
-    }
-    case lcad::EntityType::Polyline: {
-        const auto& pl = static_cast<const lcad::PolylineEntity&>(entity);
-        const auto& verts = pl.vertices();
-        for (std::size_t i = 0; i + 1 < verts.size(); ++i) {
-            painter.drawLine(worldToScreen(verts[i]), worldToScreen(verts[i + 1]));
-        }
-        if (pl.closed() && verts.size() > 1) painter.drawLine(worldToScreen(verts.back()), worldToScreen(verts.front()));
-        break;
-    }
-    case lcad::EntityType::Ellipse: {
-        const auto& ellipse = static_cast<const lcad::EllipseEntity&>(entity);
-        painter.save();
-        painter.translate(worldToScreen(ellipse.center()));
-        // World CCW rotation is clockwise in raw Y-down screen space, hence
-        // the sign flip -- same reasoning as the Text case below.
-        painter.rotate(-qRadiansToDegrees(ellipse.rotation()));
-        painter.drawEllipse(QPointF(0, 0), ellipse.radiusX() * m_scale, ellipse.radiusY() * m_scale);
-        painter.restore();
-        break;
-    }
-    case lcad::EntityType::Dimension: {
-        const auto& dim = static_cast<const lcad::DimensionEntity&>(entity);
-        const auto geo = dim.geometry();
-
-        painter.drawLine(worldToScreen(geo.ext1A), worldToScreen(geo.ext1B));
-        painter.drawLine(worldToScreen(geo.ext2A), worldToScreen(geo.ext2B));
-        painter.drawLine(worldToScreen(geo.dimA), worldToScreen(geo.dimB));
-
-        // Arrowheads: slim filled triangles at the dimension line's ends,
-        // pointing outward, sized relative to the label text.
-        const lcad::Point2D span = geo.dimB - geo.dimA;
-        const double spanLen = span.length();
-        if (spanLen > 1e-9) {
-            const lcad::Point2D dir = span * (1.0 / spanLen);
-            const lcad::Point2D normal(-dir.y, dir.x);
-            const double arrow = 0.5 * dim.textHeight();
-            auto drawArrow = [&](const lcad::Point2D& tip, const lcad::Point2D& inward) {
-                QPolygonF tri;
-                tri << worldToScreen(tip) << worldToScreen(tip + inward * arrow + normal * (arrow / 3.0))
-                    << worldToScreen(tip + inward * arrow - normal * (arrow / 3.0));
-                painter.setBrush(color);
-                painter.drawPolygon(tri);
-                painter.setBrush(Qt::NoBrush);
-            };
-            drawArrow(geo.dimA, dir);
-            drawArrow(geo.dimB, dir * -1.0);
-        }
-
-        const QString label = QString::number(geo.value, 'f', 2);
-        QFont font = painter.font();
-        font.setPixelSize(std::max(1, static_cast<int>(std::round(dim.textHeight() * m_scale))));
-        painter.save();
-        painter.setFont(font);
-        painter.translate(worldToScreen(geo.textPos));
-        painter.rotate(-qRadiansToDegrees(geo.textAngle)); // same sign flip as the Text case
-        const QFontMetricsF metrics(font);
-        painter.drawText(QPointF(-metrics.horizontalAdvance(label) / 2.0, metrics.height() / 4.0), label);
-        painter.restore();
-        break;
-    }
-    case lcad::EntityType::Text: {
-        const auto& text = static_cast<const lcad::TextEntity&>(entity);
-        QFont font = painter.font();
-        font.setPixelSize(std::max(1, static_cast<int>(std::round(text.height() * m_scale))));
-        painter.save();
-        painter.setFont(font);
-        painter.translate(worldToScreen(text.position()));
-        // painter.rotate() is clockwise in raw (Y-down) screen space, which is
-        // visually clockwise too since we draw directly in that space with no
-        // further flip -- our world angle convention is CCW-positive (visually),
-        // so it needs the opposite sign here, same reasoning as the ARC case above.
-        painter.rotate(-qRadiansToDegrees(text.rotation()));
-        painter.drawText(QPointF(0, 0), QString::fromStdString(text.text()));
-        painter.restore();
-        break;
-    }
-    }
+    EntityPainter::paint(
+        painter, entity, [this](const lcad::Point2D& p) { return worldToScreen(p); }, m_scale, color, penWidth);
 }
 
 void DrawingView::drawGrips(QPainter& painter) {

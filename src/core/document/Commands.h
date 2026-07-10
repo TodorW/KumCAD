@@ -5,6 +5,7 @@
 #include "core/geometry/Entity.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -157,6 +158,37 @@ private:
     std::vector<EntityId> m_ids;
     Point2D m_center;
     double m_factor;
+};
+
+// Sets or clears (ByLayer) the color override of a set of entities, e.g. from
+// the Properties panel. Captures prior overrides on execute() so undo can
+// restore a mixed-color selection.
+class SetEntityColorCommand : public Command {
+public:
+    SetEntityColorCommand(Document& document, std::vector<EntityId> ids, std::optional<Color> color)
+        : m_document(document), m_ids(std::move(ids)), m_color(color) {}
+
+    void execute() override {
+        m_oldColors.clear();
+        for (EntityId id : m_ids) {
+            if (Entity* e = m_document.findEntity(id)) {
+                m_oldColors.emplace_back(id, e->colorOverride());
+                e->setColorOverride(m_color);
+            }
+        }
+    }
+    void undo() override {
+        for (const auto& [id, color] : m_oldColors) {
+            if (Entity* e = m_document.findEntity(id)) e->setColorOverride(color);
+        }
+    }
+    std::string description() const override { return "Change Color"; }
+
+private:
+    Document& m_document;
+    std::vector<EntityId> m_ids;
+    std::optional<Color> m_color;
+    std::vector<std::pair<EntityId, std::optional<Color>>> m_oldColors;
 };
 
 // Reassigns a set of entities to a different layer, e.g. from the Properties

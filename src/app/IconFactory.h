@@ -24,6 +24,8 @@ QIcon trimIcon();
 QIcon extendIcon();
 QIcon filletIcon();
 QIcon dimensionIcon();
+QIcon hatchIcon();
+QIcon blockIcon();
 QIcon eraseIcon();
 
 } // namespace IconFactory

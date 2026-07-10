@@ -248,6 +248,31 @@ QIcon dimensionIcon() {
     });
 }
 
+QIcon hatchIcon() {
+    return build([](QPainter& painter) {
+        painter.drawRect(QRectF(6, 6, 20, 20));
+        QPen thin = painter.pen();
+        thin.setWidthF(1.4);
+        painter.save();
+        painter.setPen(thin);
+        painter.setClipRect(QRectF(6, 6, 20, 20));
+        for (int i = -2; i < 6; ++i) {
+            const double base = 6.0 + i * 6.0;
+            painter.drawLine(QPointF(base, 26), QPointF(base + 20, 6));
+        }
+        painter.restore();
+    });
+}
+
+QIcon blockIcon() {
+    return build([](QPainter& painter) {
+        // Grouped shapes with an insertion-point marker.
+        painter.drawRect(QRectF(6, 10, 12, 12));
+        painter.drawEllipse(QPointF(21, 21), 5, 5);
+        dot(painter, QPointF(6, 22));
+    });
+}
+
 QIcon eraseIcon() {
     return build([](QPainter& painter) {
         painter.drawLine(QPointF(9, 9), QPointF(23, 23));

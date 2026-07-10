@@ -1,11 +1,13 @@
 #pragma once
 
+#include "core/Color.h"
 #include "core/Ids.h"
 #include "core/geometry/BoundingBox.h"
 #include "core/geometry/Point2D.h"
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace lcad {
@@ -18,6 +20,8 @@ enum class EntityType {
     Ellipse,
     Text,
     Dimension,
+    Hatch,
+    Insert,
 };
 
 // Object-snap candidate kinds, mirroring AutoCAD's OSNAP markers.
@@ -42,6 +46,10 @@ public:
     void setId(EntityId id) { m_id = id; }
     LayerId layer() const { return m_layer; }
     void setLayer(LayerId layer) { m_layer = layer; }
+
+    // Explicit color, overriding the layer's ("ByLayer" when unset).
+    const std::optional<Color>& colorOverride() const { return m_colorOverride; }
+    void setColorOverride(std::optional<Color> color) { m_colorOverride = color; }
 
     virtual EntityType type() const = 0;
     virtual BoundingBox boundingBox() const = 0;
@@ -78,6 +86,7 @@ public:
 private:
     EntityId m_id;
     LayerId m_layer;
+    std::optional<Color> m_colorOverride;
 };
 
 } // namespace lcad

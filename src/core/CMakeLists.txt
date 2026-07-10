@@ -1,4 +1,5 @@
 add_library(lcad_core STATIC
+    Color.h
     Ids.h
     geometry/Point2D.h
     geometry/BoundingBox.h
@@ -17,9 +18,14 @@ add_library(lcad_core STATIC
     geometry/Text.cpp
     geometry/Dimension.h
     geometry/Dimension.cpp
+    geometry/Hatch.h
+    geometry/Hatch.cpp
+    geometry/Insert.h
+    geometry/Insert.cpp
     geometry/Intersect.h
     geometry/Intersect.cpp
     document/Layer.h
+    document/Block.h
     document/Command.h
     document/Command.cpp
     document/Commands.h

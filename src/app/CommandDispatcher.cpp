@@ -4,6 +4,7 @@
 #include "DrawingView.h"
 #include "commands/ArcCommand.h"
 #include "commands/AreaCommand.h"
+#include "commands/BlockCommand.h"
 #include "commands/CircleCommand.h"
 #include "commands/CopyCommand.h"
 #include "commands/DimCommand.h"
@@ -11,6 +12,7 @@
 #include "commands/EllipseCommand.h"
 #include "commands/ExtendCommand.h"
 #include "commands/FilletCommand.h"
+#include "commands/InsertCommand.h"
 #include "commands/LineCommand.h"
 #include "commands/MirrorCommand.h"
 #include "commands/MoveCommand.h"
@@ -21,6 +23,11 @@
 #include "commands/ScaleCommand.h"
 #include "commands/TextCommand.h"
 #include "commands/TrimCommand.h"
+#include "core/document/Commands.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
+#include "core/geometry/Line.h"
+#include "core/geometry/Polyline.h"
 
 #include <QStringList>
 
@@ -161,6 +168,15 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<DimCommand>(m_document, false), QStringLiteral("DIMLINEAR"));
     } else if (cmd == QLatin1String("DIMALIGNED") || cmd == QLatin1String("DAL")) {
         startCommand(std::make_unique<DimCommand>(m_document, true), QStringLiteral("DIMALIGNED"));
+    } else if (cmd == QLatin1String("HATCH") || cmd == QLatin1String("H")) {
+        hatchSelection();
+    } else if (cmd == QLatin1String("BLOCK") || cmd == QLatin1String("B")) {
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        if (!ids.empty()) startCommand(std::make_unique<BlockCommand>(m_document, ids), QStringLiteral("BLOCK"));
+    } else if (cmd == QLatin1String("INSERT") || cmd == QLatin1String("I")) {
+        startCommand(std::make_unique<InsertCommand>(m_document), QStringLiteral("INSERT"));
+    } else if (cmd == QLatin1String("EXPLODE") || cmd == QLatin1String("X")) {
+        explodeSelection();
     } else if (cmd == QLatin1String("AREA") || cmd == QLatin1String("AA")) {
         startCommand(std::make_unique<AreaCommand>(), QStringLiteral("AREA"));
     } else if (cmd == QLatin1String("DIST") || cmd == QLatin1String("DI")) {
@@ -231,6 +247,88 @@ void CommandDispatcher::redo() {
 
 double CommandDispatcher::pickTolerance() const {
     return m_view ? m_view->pickToleranceWorld() : 0.5;
+}
+
+void CommandDispatcher::hatchSelection() {
+    const std::vector<lcad::EntityId> ids = selectionForModify();
+    if (ids.empty()) return;
+
+    auto batch = std::make_unique<lcad::BatchCommand>("Hatch");
+    int made = 0;
+    int skipped = 0;
+    for (lcad::EntityId id : ids) {
+        const lcad::Entity* e = m_document.findEntity(id);
+        if (e && e->type() == lcad::EntityType::Polyline) {
+            const auto& pl = static_cast<const lcad::PolylineEntity&>(*e);
+            if (pl.closed() && pl.vertices().size() >= 3) {
+                batch->add(std::make_unique<lcad::AddEntityCommand>(
+                    m_document, std::make_unique<lcad::HatchEntity>(m_document.reserveEntityId(), e->layer(),
+                                                                    pl.vertices())));
+                ++made;
+                continue;
+            }
+        }
+        ++skipped;
+    }
+    if (!batch->empty()) {
+        m_document.commandStack().execute(std::move(batch));
+        emit documentChanged();
+    }
+    if (skipped > 0) {
+        m_commandLine.appendLine(
+            QStringLiteral("*%1 hatched, %2 skipped (only closed polylines can be hatched)*").arg(made).arg(skipped));
+    } else {
+        m_commandLine.appendLine(QStringLiteral("*%1 hatched*").arg(made));
+    }
+}
+
+void CommandDispatcher::explodeSelection() {
+    const std::vector<lcad::EntityId> ids = selectionForModify();
+    if (ids.empty()) return;
+
+    auto batch = std::make_unique<lcad::BatchCommand>("Explode");
+    int made = 0;
+    int skipped = 0;
+    for (lcad::EntityId id : ids) {
+        const lcad::Entity* e = m_document.findEntity(id);
+        if (!e) continue;
+        if (e->type() == lcad::EntityType::Insert) {
+            const auto& insert = static_cast<const lcad::InsertEntity&>(*e);
+            batch->add(std::make_unique<lcad::DeleteEntityCommand>(m_document, id));
+            for (auto& child : insert.instantiate()) {
+                child->setId(m_document.reserveEntityId());
+                batch->add(std::make_unique<lcad::AddEntityCommand>(m_document, std::move(child)));
+            }
+            ++made;
+        } else if (e->type() == lcad::EntityType::Polyline) {
+            const auto& pl = static_cast<const lcad::PolylineEntity&>(*e);
+            const auto& v = pl.vertices();
+            batch->add(std::make_unique<lcad::DeleteEntityCommand>(m_document, id));
+            for (std::size_t i = 0; i + 1 < v.size(); ++i) {
+                batch->add(std::make_unique<lcad::AddEntityCommand>(
+                    m_document,
+                    std::make_unique<lcad::LineEntity>(m_document.reserveEntityId(), e->layer(), v[i], v[i + 1])));
+            }
+            if (pl.closed() && v.size() > 1) {
+                batch->add(std::make_unique<lcad::AddEntityCommand>(
+                    m_document,
+                    std::make_unique<lcad::LineEntity>(m_document.reserveEntityId(), e->layer(), v.back(), v.front())));
+            }
+            ++made;
+        } else {
+            ++skipped;
+        }
+    }
+    if (!batch->empty()) {
+        m_document.commandStack().execute(std::move(batch));
+        emit documentChanged();
+    }
+    if (skipped > 0) {
+        m_commandLine.appendLine(
+            QStringLiteral("*%1 exploded, %2 skipped (blocks and polylines only)*").arg(made).arg(skipped));
+    } else {
+        m_commandLine.appendLine(QStringLiteral("*%1 exploded*").arg(made));
+    }
 }
 
 std::vector<lcad::EntityId> CommandDispatcher::selectionForModify() const {

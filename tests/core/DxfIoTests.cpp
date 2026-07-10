@@ -3,6 +3,8 @@
 #include "core/geometry/Circle.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Text.h"
@@ -126,7 +128,9 @@ TEST_CASE("DXF round-trip preserves entities and layers", "[dxf]") {
             break;
         }
         case lcad::EntityType::Dimension:
-            break; // not part of this round-trip; covered by its own test
+        case lcad::EntityType::Hatch:
+        case lcad::EntityType::Insert:
+            break; // not part of this round-trip; covered by their own tests
         }
     }
     REQUIRE(foundLine);
@@ -299,4 +303,83 @@ TEST_CASE("DXF dimension round-trips", "[dxf][dimension]") {
     const auto* aligned = static_cast<const lcad::DimensionEntity*>(loaded.entities()[1]);
     REQUIRE(aligned->aligned());
     REQUIRE(aligned->geometry().value == Approx(5.0));
+}
+
+TEST_CASE("DXF hatch round-trips", "[dxf][hatch]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    std::vector<lcad::Point2D> tri{{0, 0}, {10, 0}, {5, 8}};
+    doc.addEntity(std::make_unique<lcad::HatchEntity>(doc.reserveEntityId(), doc.currentLayer(), tri));
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+    REQUIRE(loaded.entities().size() == 1);
+
+    const auto* hatch = static_cast<const lcad::HatchEntity*>(loaded.entities().front());
+    REQUIRE(hatch->type() == lcad::EntityType::Hatch);
+    REQUIRE(hatch->vertices().size() == 3);
+    REQUIRE(hatch->vertices()[2].y == Approx(8.0));
+    REQUIRE(hatch->containsPoint(lcad::Point2D(5, 2)));
+}
+
+TEST_CASE("DXF block definitions and inserts round-trip", "[dxf][block]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    std::vector<std::unique_ptr<lcad::Entity>> children;
+    children.push_back(
+        std::make_unique<lcad::CircleEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0), 2.0));
+    children.push_back(
+        std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(-2, 0), lcad::Point2D(2, 0)));
+    const lcad::BlockDefinition* block = doc.addBlock("Bolt", std::move(children));
+    doc.addEntity(std::make_unique<lcad::InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block,
+                                                         lcad::Point2D(50, 20), 2.0, M_PI / 2));
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    REQUIRE(loaded.blocks().size() == 1);
+    const lcad::BlockDefinition* loadedBlock = loaded.findBlock("Bolt");
+    REQUIRE(loadedBlock != nullptr);
+    REQUIRE(loadedBlock->entities.size() == 2);
+
+    REQUIRE(loaded.entities().size() == 1);
+    const auto* insert = static_cast<const lcad::InsertEntity*>(loaded.entities().front());
+    REQUIRE(insert->type() == lcad::EntityType::Insert);
+    REQUIRE(insert->blockName() == "Bolt");
+    REQUIRE(insert->position().x == Approx(50.0));
+    REQUIRE(insert->scaleFactor() == Approx(2.0));
+    REQUIRE(insert->rotation() == Approx(M_PI / 2));
+    // The placed circle: radius 2 scaled by 2 around (50, 20).
+    const auto box = insert->boundingBox();
+    REQUIRE(box.max.x == Approx(54.0));
+    REQUIRE(box.min.x == Approx(46.0));
+}
+
+TEST_CASE("DXF entity color override round-trips", "[dxf][color]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    auto line = std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(0, 0),
+                                                     lcad::Point2D(5, 5));
+    line->setColorOverride(lcad::Color{10, 200, 30});
+    doc.addEntity(std::move(line));
+    doc.addEntity(std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(1, 1),
+                                                       lcad::Point2D(2, 2))); // ByLayer
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+    REQUIRE(loaded.entities().size() == 2);
+
+    const auto& overridden = *loaded.entities()[0];
+    REQUIRE(overridden.colorOverride().has_value());
+    REQUIRE(overridden.colorOverride()->r == 10);
+    REQUIRE(overridden.colorOverride()->g == 200);
+    REQUIRE(overridden.colorOverride()->b == 30);
+
+    REQUIRE_FALSE(loaded.entities()[1]->colorOverride().has_value());
 }

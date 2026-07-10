@@ -3,6 +3,7 @@
 #include "CommandDispatcher.h"
 #include "CommandLine.h"
 #include "DrawingView.h"
+#include "EntityPainter.h"
 #include "IconFactory.h"
 #include "LayerPanel.h"
 #include "PropertiesPanel.h"
@@ -20,8 +21,13 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QStatusBar>
 #include <QToolBar>
+
+#include <algorithm>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(1280, 800);
@@ -59,8 +65,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     updateModeLabels();
 
     m_commandLine->appendLine(QStringLiteral(
-        "KumCAD — type a command (LINE, CIRCLE, ARC, PLINE, RECTANG, ELLIPSE, TEXT, DIMLINEAR, DIMALIGNED, MOVE, COPY, "
-        "ROTATE, SCALE, MIRROR, OFFSET, TRIM, EXTEND, FILLET, ERASE, DIST, AREA, ZOOM, UNDO, REDO) and press Enter."));
+        "KumCAD — type a command (LINE, CIRCLE, ARC, PLINE, RECTANG, ELLIPSE, TEXT, DIMLINEAR, DIMALIGNED, HATCH, "
+        "BLOCK, INSERT, EXPLODE, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM, EXTEND, FILLET, ERASE, DIST, AREA, "
+        "ZOOM, UNDO, REDO) and press Enter."));
     m_commandLine->appendLine(QStringLiteral("F3 Object Snap / F8 Ortho / F9 Grid Snap toggle the drafting aids below."));
     m_commandLine->appendLine(QStringLiteral("Command:"));
     m_commandLine->input()->setFocus();
@@ -116,6 +123,9 @@ void MainWindow::setupMenusAndToolbar() {
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("&Save"), QKeySequence::Save, this, [this]() { saveDocument(); });
     fileMenu->addAction(QStringLiteral("Save &As..."), QKeySequence::SaveAs, this, [this]() { saveDocumentAs(); });
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("&Print..."), QKeySequence::Print, this, &MainWindow::printDocument);
+    fileMenu->addAction(QStringLiteral("Export P&DF..."), this, &MainWindow::exportPdf);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("E&xit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -181,6 +191,8 @@ void MainWindow::setupMenusAndToolbar() {
 
     toolbar->addSeparator();
     addCommandAction(IconFactory::dimensionIcon(), QStringLiteral("Dimension"), QStringLiteral("DIMLINEAR"));
+    addCommandAction(IconFactory::hatchIcon(), QStringLiteral("Hatch"), QStringLiteral("HATCH"));
+    addCommandAction(IconFactory::blockIcon(), QStringLiteral("Block"), QStringLiteral("BLOCK"));
 
     toolbar->addSeparator();
     auto* eraseAction = toolbar->addAction(IconFactory::eraseIcon(), QStringLiteral("Erase"));
@@ -272,6 +284,75 @@ bool MainWindow::saveDocument() {
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Saved %1").arg(QFileInfo(m_currentFilePath).fileName()), 3000);
     return true;
+}
+
+void MainWindow::printDocument() {
+    QPrinter printer(QPrinter::HighResolution);
+    QPrintDialog dialog(&printer, this);
+    dialog.setWindowTitle(QStringLiteral("Print Drawing"));
+    if (dialog.exec() != QDialog::Accepted) return;
+    renderDrawing(printer);
+    statusBar()->showMessage(QStringLiteral("Printed"), 3000);
+}
+
+void MainWindow::exportPdf() {
+    QString path =
+        QFileDialog::getSaveFileName(this, QStringLiteral("Export PDF"), QString(), QStringLiteral("PDF Files (*.pdf)"));
+    if (path.isEmpty()) return;
+    if (!path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) path += QStringLiteral(".pdf");
+
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(path);
+    renderDrawing(printer);
+    statusBar()->showMessage(QStringLiteral("Exported %1").arg(QFileInfo(path).fileName()), 3000);
+}
+
+void MainWindow::renderDrawing(QPrinter& printer) {
+    lcad::BoundingBox box;
+    const auto entities = m_document.entities();
+    for (const lcad::Entity* e : entities) {
+        const lcad::Layer* layer = m_document.findLayer(e->layer());
+        if (layer && !layer->visible) continue;
+        box.expand(e->boundingBox());
+    }
+
+    QPainter painter(&printer);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QRect viewport = painter.viewport();
+    painter.fillRect(viewport, Qt::white);
+
+    if (!box.isValid()) {
+        painter.drawText(viewport, Qt::AlignCenter, QStringLiteral("(empty drawing)"));
+        return;
+    }
+
+    const double w = std::max(box.max.x - box.min.x, 1e-6);
+    const double h = std::max(box.max.y - box.min.y, 1e-6);
+    const double margin = 1.1;
+    const double scale = std::min(viewport.width() / (w * margin), viewport.height() / (h * margin));
+    const double cx = (box.min.x + box.max.x) / 2.0;
+    const double cy = (box.min.y + box.max.y) / 2.0;
+    const QPointF pageCenter = QRectF(viewport).center();
+    const auto toScreen = [scale, cx, cy, pageCenter](const lcad::Point2D& p) {
+        return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
+    };
+
+    // Roughly one printer's point of line width regardless of resolution.
+    const double penWidth = std::max(1.0, printer.resolution() / 72.0);
+
+    for (const lcad::Entity* e : entities) {
+        const lcad::Layer* layer = m_document.findLayer(e->layer());
+        if (layer && !layer->visible) continue;
+
+        lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
+        if (const auto& override = e->colorOverride()) c = *override;
+        // Colors that read well on the dark canvas vanish on paper.
+        QColor color(c.r, c.g, c.b);
+        if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
+
+        EntityPainter::paint(painter, *e, toScreen, scale, color, penWidth);
+    }
 }
 
 bool MainWindow::saveDocumentAs() {

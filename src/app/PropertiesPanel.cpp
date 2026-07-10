@@ -6,14 +6,19 @@
 #include "core/geometry/Circle.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Text.h"
 
+#include <QColorDialog>
 #include <QComboBox>
 #include <QFont>
 #include <QFormLayout>
 #include <QLabel>
+#include <QPainter>
+#include <QPixmap>
 #include <QVBoxLayout>
 
 #include <cmath>
@@ -29,6 +34,41 @@ QString formatDegrees(double radians) {
     return formatNumber(radians * 180.0 / M_PI) + QStringLiteral("\xC2\xB0"); // degree sign
 }
 
+struct NamedColor {
+    const char* name;
+    lcad::Color color;
+};
+
+// The classic ACI 1-9 palette, the colors drafters actually reach for.
+const NamedColor kNamedColors[] = {
+    {"Red", {255, 0, 0}},     {"Yellow", {255, 255, 0}}, {"Green", {0, 255, 0}},
+    {"Cyan", {0, 255, 255}},  {"Blue", {0, 0, 255}},     {"Magenta", {255, 0, 255}},
+    {"White", {255, 255, 255}}, {"Gray", {128, 128, 128}},
+};
+
+QIcon colorSwatch(const lcad::Color& color) {
+    QPixmap pixmap(12, 12);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setPen(QColor(0, 0, 0, 80));
+    painter.setBrush(QColor(color.r, color.g, color.b));
+    painter.drawRect(0, 0, 11, 11);
+    return QIcon(pixmap);
+}
+
+// Combo item data: -1 = ByLayer, -2 = Custom..., otherwise 0xRRGGBB.
+constexpr int kByLayerData = -1;
+constexpr int kCustomData = -2;
+
+int packColor(const lcad::Color& c) {
+    return (static_cast<int>(c.r) << 16) | (static_cast<int>(c.g) << 8) | static_cast<int>(c.b);
+}
+
+lcad::Color unpackColor(int v) {
+    return lcad::Color{static_cast<std::uint8_t>((v >> 16) & 0xFF), static_cast<std::uint8_t>((v >> 8) & 0xFF),
+                       static_cast<std::uint8_t>(v & 0xFF)};
+}
+
 } // namespace
 
 PropertiesPanel::PropertiesPanel(lcad::Document& document, DrawingView& view, QWidget* parent)
@@ -42,8 +82,14 @@ PropertiesPanel::PropertiesPanel(lcad::Document& document, DrawingView& view, QW
     connect(m_layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             &PropertiesPanel::onLayerComboChanged);
 
+    m_colorCombo = new QComboBox(this);
+    populateColorCombo();
+    connect(m_colorCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &PropertiesPanel::onColorComboChanged);
+
     auto* topForm = new QFormLayout();
     topForm->addRow(QStringLiteral("Layer:"), m_layerCombo);
+    topForm->addRow(QStringLiteral("Color:"), m_colorCombo);
 
     m_fieldsForm = new QFormLayout();
 
@@ -77,10 +123,42 @@ void PropertiesPanel::refresh() {
     if (ids.empty()) {
         m_summaryLabel->setText(QStringLiteral("No selection"));
         m_layerCombo->setEnabled(false);
+        m_colorCombo->setEnabled(false);
         m_updating = false;
         return;
     }
     m_layerCombo->setEnabled(true);
+    m_colorCombo->setEnabled(true);
+
+    // Color combo: ByLayer when nothing is overridden, the matching swatch
+    // when every entity carries the same override, Custom for mixed states.
+    int totalCount = 0;
+    int overrideCount = 0;
+    bool sameOverride = true;
+    std::optional<lcad::Color> commonColor;
+    for (lcad::EntityId id : ids) {
+        if (const lcad::Entity* e = m_document.findEntity(id)) {
+            ++totalCount;
+            if (const auto& o = e->colorOverride()) {
+                ++overrideCount;
+                if (!commonColor) commonColor = o;
+                else if (!(*o == *commonColor)) sameOverride = false;
+            }
+        }
+    }
+    int colorIndex = 0; // ByLayer
+    if (overrideCount > 0) {
+        colorIndex = m_colorCombo->count() - 1; // Custom, unless a swatch matches below
+        if (overrideCount == totalCount && sameOverride && commonColor) {
+            for (int i = 1; i < m_colorCombo->count() - 1; ++i) {
+                if (unpackColor(m_colorCombo->itemData(i).toInt()) == *commonColor) {
+                    colorIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+    m_colorCombo->setCurrentIndex(colorIndex);
 
     std::optional<lcad::LayerId> commonLayer;
     bool uniformLayer = true;
@@ -174,6 +252,23 @@ void PropertiesPanel::refresh() {
                QStringLiteral("%1, %2").arg(formatNumber(dim->point2().x), formatNumber(dim->point2().y)));
         break;
     }
+    case lcad::EntityType::Hatch: {
+        const auto* hatch = static_cast<const lcad::HatchEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Hatch"));
+        addRow(QStringLiteral("Pattern:"), QStringLiteral("Solid"));
+        addRow(QStringLiteral("Vertices:"), QString::number(hatch->vertices().size()));
+        break;
+    }
+    case lcad::EntityType::Insert: {
+        const auto* insert = static_cast<const lcad::InsertEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Block Reference"));
+        addRow(QStringLiteral("Block:"), QString::fromStdString(insert->blockName()));
+        addRow(QStringLiteral("Position X:"), formatNumber(insert->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(insert->position().y));
+        addRow(QStringLiteral("Scale:"), formatNumber(insert->scaleFactor()));
+        addRow(QStringLiteral("Rotation:"), formatDegrees(insert->rotation()));
+        break;
+    }
     case lcad::EntityType::Text: {
         const auto* text = static_cast<const lcad::TextEntity*>(e);
         m_summaryLabel->setText(QStringLiteral("Text"));
@@ -187,6 +282,39 @@ void PropertiesPanel::refresh() {
     }
 
     m_updating = false;
+}
+
+void PropertiesPanel::populateColorCombo() {
+    m_colorCombo->addItem(QStringLiteral("ByLayer"), kByLayerData);
+    for (const NamedColor& nc : kNamedColors) {
+        m_colorCombo->addItem(colorSwatch(nc.color), QString::fromLatin1(nc.name), packColor(nc.color));
+    }
+    m_colorCombo->addItem(QStringLiteral("Custom..."), kCustomData);
+}
+
+void PropertiesPanel::applyColor(std::optional<lcad::Color> color) {
+    const auto ids = m_view.selectedIds();
+    if (ids.empty()) return;
+    m_document.commandStack().execute(std::make_unique<lcad::SetEntityColorCommand>(m_document, ids, color));
+    emit documentChanged();
+}
+
+void PropertiesPanel::onColorComboChanged(int index) {
+    if (m_updating || index < 0) return;
+    const int data = m_colorCombo->itemData(index).toInt();
+    if (data == kByLayerData) {
+        applyColor(std::nullopt);
+    } else if (data == kCustomData) {
+        const QColor picked = QColorDialog::getColor(Qt::white, this, QStringLiteral("Entity Color"));
+        if (picked.isValid()) {
+            applyColor(lcad::Color{static_cast<std::uint8_t>(picked.red()), static_cast<std::uint8_t>(picked.green()),
+                                   static_cast<std::uint8_t>(picked.blue())});
+        } else {
+            refresh(); // dialog cancelled: restore the combo to reality
+        }
+    } else {
+        applyColor(unpackColor(data));
+    }
 }
 
 void PropertiesPanel::onLayerComboChanged(int index) {

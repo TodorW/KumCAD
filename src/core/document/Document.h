@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Ids.h"
+#include "core/document/Block.h"
 #include "core/document/Command.h"
 #include "core/document/Layer.h"
 #include "core/geometry/Entity.h"
@@ -34,6 +35,13 @@ public:
     std::vector<Entity*> entities();
     std::vector<const Entity*> entities() const;
 
+    // Blocks. Definitions are append-only (deleting one would dangle any
+    // InsertEntity referencing it) and owned by the document, so pointers to
+    // them stay valid for the document's lifetime, including across moves.
+    const BlockDefinition* addBlock(std::string name, std::vector<std::unique_ptr<Entity>> entities);
+    const BlockDefinition* findBlock(const std::string& name) const;
+    const std::vector<std::unique_ptr<BlockDefinition>>& blocks() const { return m_blocks; }
+
     CommandStack& commandStack() { return m_commandStack; }
 
 private:
@@ -44,6 +52,8 @@ private:
     std::unordered_map<EntityId, std::unique_ptr<Entity>> m_entityMap;
     std::vector<EntityId> m_entityOrder;
     EntityId m_nextEntityId = 1;
+
+    std::vector<std::unique_ptr<BlockDefinition>> m_blocks;
 
     CommandStack m_commandStack;
 };

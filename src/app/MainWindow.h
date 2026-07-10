@@ -12,6 +12,7 @@ class CommandDispatcher;
 class LayerPanel;
 class PropertiesPanel;
 class QLabel;
+class QPrinter;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -37,6 +38,12 @@ private:
     void openDocument();
     bool saveDocument();
     bool saveDocumentAs();
+
+    void printDocument();
+    void exportPdf();
+    // Fit-to-page rendering of all visible entities onto paper (white
+    // background, near-white colors mapped to black).
+    void renderDrawing(QPrinter& printer);
 
     lcad::Document m_document;
     DrawingView* m_view = nullptr;

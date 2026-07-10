@@ -1,7 +1,10 @@
+#include "core/document/Document.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
 #include "core/geometry/Intersect.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/Polyline.h"
@@ -450,4 +453,47 @@ TEST_CASE("DimensionEntity geometry", "[geometry][dimension]") {
         REQUIRE(dim.geometry().value == Approx(8.0));
         REQUIRE(dim.textHeight() == Approx(5.0));
     }
+}
+
+TEST_CASE("HatchEntity containment and distance", "[geometry][hatch]") {
+    std::vector<lcad::Point2D> square{{0, 0}, {10, 0}, {10, 10}, {0, 10}};
+    lcad::HatchEntity hatch(1, 0, square);
+
+    REQUIRE(hatch.containsPoint(lcad::Point2D(5, 5)));
+    REQUIRE_FALSE(hatch.containsPoint(lcad::Point2D(15, 5)));
+    REQUIRE(hatch.distanceTo(lcad::Point2D(5, 5)) == Approx(0.0)); // interior picks count
+    REQUIRE(hatch.distanceTo(lcad::Point2D(12, 5)) == Approx(2.0));
+
+    const auto box = hatch.boundingBox();
+    REQUIRE(box.max.x == Approx(10.0));
+    REQUIRE(box.max.y == Approx(10.0));
+}
+
+TEST_CASE("InsertEntity transforms its block's children", "[geometry][block]") {
+    lcad::Document doc;
+    std::vector<std::unique_ptr<lcad::Entity>> children;
+    children.push_back(
+        std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0), lcad::Point2D(1, 0)));
+    const lcad::BlockDefinition* block = doc.addBlock("unit-line", std::move(children));
+
+    // Placed at (10, 5), doubled, rotated 90 degrees CCW: the unit X line
+    // becomes a length-2 line pointing up from the insertion point.
+    lcad::InsertEntity insert(doc.reserveEntityId(), 0, block, lcad::Point2D(10, 5), 2.0, M_PI / 2);
+
+    const auto instances = insert.instantiate();
+    REQUIRE(instances.size() == 1);
+    const auto* line = static_cast<const lcad::LineEntity*>(instances[0].get());
+    REQUIRE(line->start().x == Approx(10.0));
+    REQUIRE(line->start().y == Approx(5.0));
+    REQUIRE(line->end().x == Approx(10.0).margin(1e-9));
+    REQUIRE(line->end().y == Approx(7.0));
+
+    const auto box = insert.boundingBox();
+    REQUIRE(box.max.y == Approx(7.0));
+    REQUIRE(insert.distanceTo(lcad::Point2D(10, 6)) == Approx(0.0).margin(1e-9));
+
+    // Uniform scale about a point scales the placement too.
+    insert.scale(lcad::Point2D(10, 5), 0.5);
+    REQUIRE(insert.scaleFactor() == Approx(1.0));
+    REQUIRE(insert.boundingBox().max.y == Approx(6.0));
 }

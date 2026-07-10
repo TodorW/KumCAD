@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets PrintSupport)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -10,6 +10,8 @@ add_executable(kumcad
     MainWindow.cpp
     DrawingView.h
     DrawingView.cpp
+    EntityPainter.h
+    EntityPainter.cpp
     CommandLine.h
     CommandLine.cpp
     CommandDispatcher.h
@@ -59,7 +61,11 @@ add_executable(kumcad
     commands/DimCommand.cpp
     commands/AreaCommand.h
     commands/AreaCommand.cpp
+    commands/BlockCommand.h
+    commands/BlockCommand.cpp
+    commands/InsertCommand.h
+    commands/InsertCommand.cpp
 )
 
 target_include_directories(kumcad PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(kumcad PRIVATE lcad_core Qt6::Widgets Qt6::OpenGLWidgets)
+target_link_libraries(kumcad PRIVATE lcad_core Qt6::Widgets Qt6::OpenGLWidgets Qt6::PrintSupport)

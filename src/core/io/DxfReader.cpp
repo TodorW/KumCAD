@@ -4,6 +4,8 @@
 #include "core/geometry/Circle.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Text.h"
@@ -86,7 +88,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::unordered_map<std::string, LayerId> layerByName;
     layerByName["0"] = 0;
 
-    enum class Section { None, Header, Tables, Entities } section = Section::None;
+    enum class Section { None, Header, Tables, Blocks, Entities } section = Section::None;
     bool inLayerTable = false;
 
     std::string curLayerName;
@@ -113,6 +115,30 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         curLayerLocked = false;
     };
 
+    // Block-definition state: while a BLOCK ... ENDBLK is open, flushed
+    // entities land in curBlockEntities instead of the document.
+    bool inBlockHeader = false;
+    bool inBlockBody = false;
+    std::string curBlockName;
+    Point2D curBlockBase;
+    std::vector<std::unique_ptr<Entity>> curBlockEntities;
+
+    auto finalizeBlock = [&]() {
+        if (curBlockName.empty()) {
+            curBlockEntities.clear();
+            return;
+        }
+        // Normalize child geometry to be base-point-relative.
+        if (std::abs(curBlockBase.x) > 1e-12 || std::abs(curBlockBase.y) > 1e-12) {
+            const Point2D shift(-curBlockBase.x, -curBlockBase.y);
+            for (auto& e : curBlockEntities) e->translate(shift);
+        }
+        if (!fresh.findBlock(curBlockName)) fresh.addBlock(curBlockName, std::move(curBlockEntities));
+        curBlockEntities.clear();
+        curBlockName.clear();
+        curBlockBase = Point2D();
+    };
+
     std::string curEntityType;
     std::string curLayerRef = "0";
     Point2D p10, p11, p13, p14;
@@ -130,21 +156,29 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double textHeight = 0.0;
     double textRotationDeg = 0.0;
     std::string textContent;
+    int hatchVertsExpected = 0;
+    std::string insertName;
+    double insertScale = 1.0;
+    int entityAci = 0;             // per-entity color override, 0 = none seen
+    bool entityHasTrueColor = false;
+    Color entityTrueColor{255, 255, 255};
 
     auto flushEntity = [&]() {
         if (curEntityType.empty()) return;
         const auto it = layerByName.find(curLayerRef);
         const LayerId layerId = it != layerByName.end() ? it->second : 0;
         const EntityId id = fresh.reserveEntityId();
+        std::unique_ptr<Entity> made;
+
         if (curEntityType == "LINE") {
-            fresh.addEntity(std::make_unique<LineEntity>(id, layerId, p10, p11));
+            made = std::make_unique<LineEntity>(id, layerId, p10, p11);
         } else if (curEntityType == "CIRCLE") {
-            fresh.addEntity(std::make_unique<CircleEntity>(id, layerId, p10, radius));
+            made = std::make_unique<CircleEntity>(id, layerId, p10, radius);
         } else if (curEntityType == "ARC") {
-            fresh.addEntity(std::make_unique<ArcEntity>(id, layerId, p10, radius, startAngleDeg * M_PI / 180.0,
-                                                          endAngleDeg * M_PI / 180.0));
+            made = std::make_unique<ArcEntity>(id, layerId, p10, radius, startAngleDeg * M_PI / 180.0,
+                                               endAngleDeg * M_PI / 180.0);
         } else if ((curEntityType == "LWPOLYLINE" || curEntityType == "POLYLINE") && polyVerts.size() >= 2) {
-            fresh.addEntity(std::make_unique<PolylineEntity>(id, layerId, polyVerts, closed));
+            made = std::make_unique<PolylineEntity>(id, layerId, polyVerts, closed);
         } else if (curEntityType == "ELLIPSE") {
             // p11 is the major axis endpoint relative to center; its direction
             // is the ellipse's rotation. An ellipse is symmetric under 180
@@ -164,13 +198,33 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 rx = minorRadius;
                 ry = majorRadius;
             }
-            fresh.addEntity(std::make_unique<EllipseEntity>(id, layerId, p10, rx, ry, rotation));
+            made = std::make_unique<EllipseEntity>(id, layerId, p10, rx, ry, rotation);
         } else if (curEntityType == "TEXT" && !textContent.empty()) {
-            fresh.addEntity(
-                std::make_unique<TextEntity>(id, layerId, p10, textContent, textHeight, textRotationDeg * M_PI / 180.0));
+            made = std::make_unique<TextEntity>(id, layerId, p10, textContent, textHeight,
+                                                textRotationDeg * M_PI / 180.0);
         } else if (curEntityType == "DIMENSION") {
             const bool aligned = (dimType & 7) == 1; // low bits: 0 = rotated/linear, 1 = aligned
-            fresh.addEntity(std::make_unique<DimensionEntity>(id, layerId, p13, p14, p10, aligned, dimTextHeight));
+            made = std::make_unique<DimensionEntity>(id, layerId, p13, p14, p10, aligned, dimTextHeight);
+        } else if (curEntityType == "HATCH" && polyVerts.size() >= 3) {
+            made = std::make_unique<HatchEntity>(id, layerId, polyVerts);
+        } else if (curEntityType == "INSERT" && !insertName.empty()) {
+            if (const BlockDefinition* block = fresh.findBlock(insertName)) {
+                made = std::make_unique<InsertEntity>(id, layerId, block, p10, insertScale,
+                                                      startAngleDeg * M_PI / 180.0);
+            }
+        }
+
+        if (made) {
+            if (entityHasTrueColor) {
+                made->setColorOverride(entityTrueColor);
+            } else if (entityAci >= 1 && entityAci <= 255) {
+                made->setColorOverride(aciToColor(entityAci));
+            }
+            if (inBlockBody) {
+                curBlockEntities.push_back(std::move(made));
+            } else {
+                fresh.addEntity(std::move(made));
+            }
         }
 
         curEntityType.clear();
@@ -192,31 +246,55 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         textHeight = 0.0;
         textRotationDeg = 0.0;
         textContent.clear();
+        hatchVertsExpected = 0;
+        insertName.clear();
+        insertScale = 1.0;
+        entityAci = 0;
+        entityHasTrueColor = false;
     };
 
     for (const Group& g : groups) {
+        const bool entityContext = section == Section::Entities || (section == Section::Blocks && inBlockBody);
+
         if (g.code == 0) {
             if (section == Section::Tables && inLayerTable) flushLayer();
             // Old-style POLYLINE carries its points as VERTEX sub-entities
             // terminated by SEQEND, so those two must not flush the pending
             // polyline the way a new top-level entity would.
-            if (section == Section::Entities && g.value == "VERTEX" && curEntityType == "POLYLINE") {
+            if (entityContext && g.value == "VERTEX" && curEntityType == "POLYLINE") {
                 inVertex = true;
                 continue;
             }
-            if (section == Section::Entities) flushEntity();
+            if (entityContext) flushEntity();
             if (g.value == "SEQEND") continue;
 
             if (g.value == "SECTION") {
                 section = Section::None; // determined by the group 2 that follows
             } else if (g.value == "ENDSEC") {
+                if (section == Section::Blocks) finalizeBlock();
                 section = Section::None;
                 inLayerTable = false;
+                inBlockHeader = false;
+                inBlockBody = false;
             } else if (g.value == "ENDTAB") {
                 inLayerTable = false;
             } else if (g.value == "LAYER" && section == Section::Tables) {
                 inLayerTable = true;
                 haveLayerName = false;
+            } else if (section == Section::Blocks) {
+                if (g.value == "BLOCK") {
+                    finalizeBlock(); // tolerate a missing ENDBLK
+                    inBlockHeader = true;
+                    inBlockBody = false;
+                } else if (g.value == "ENDBLK") {
+                    finalizeBlock();
+                    inBlockHeader = false;
+                    inBlockBody = false;
+                } else if (inBlockHeader || inBlockBody) {
+                    inBlockHeader = false;
+                    inBlockBody = true;
+                    curEntityType = g.value;
+                }
             } else if (section == Section::Entities) {
                 curEntityType = g.value;
             }
@@ -227,10 +305,15 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             if (section == Section::None) {
                 if (g.value == "HEADER") section = Section::Header;
                 else if (g.value == "TABLES") section = Section::Tables;
+                else if (g.value == "BLOCKS") section = Section::Blocks;
                 else if (g.value == "ENTITIES") section = Section::Entities;
             } else if (section == Section::Tables && inLayerTable) {
                 curLayerName = g.value;
                 haveLayerName = true;
+            } else if (section == Section::Blocks && inBlockHeader) {
+                curBlockName = g.value;
+            } else if (entityContext && curEntityType == "INSERT") {
+                insertName = g.value;
             }
             continue;
         }
@@ -251,7 +334,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             continue;
         }
 
-        if (section != Section::Entities || curEntityType.empty()) continue;
+        if (section == Section::Blocks && inBlockHeader) {
+            if (g.code == 10) curBlockBase.x = toDouble(g.value);
+            else if (g.code == 20) curBlockBase.y = toDouble(g.value);
+            continue;
+        }
+
+        if (!entityContext || curEntityType.empty()) continue;
 
         switch (g.code) {
         case 8:
@@ -261,15 +350,21 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             if (curEntityType == "LWPOLYLINE" || inVertex) {
                 pendingVertX = toDouble(g.value);
                 havePendingVertX = true;
+            } else if (curEntityType == "HATCH") {
+                if (hatchVertsExpected > 0) {
+                    pendingVertX = toDouble(g.value);
+                    havePendingVertX = true;
+                }
             } else {
                 p10.x = toDouble(g.value);
             }
             break;
         case 20:
-            if (curEntityType == "LWPOLYLINE" || inVertex) {
+            if (curEntityType == "LWPOLYLINE" || inVertex || curEntityType == "HATCH") {
                 if (havePendingVertX) {
                     polyVerts.emplace_back(pendingVertX, toDouble(g.value));
                     havePendingVertX = false;
+                    if (curEntityType == "HATCH" && hatchVertsExpected > 0) --hatchVertsExpected;
                 }
             } else {
                 p10.y = toDouble(g.value);
@@ -293,13 +388,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         case 24:
             p14.y = toDouble(g.value);
             break;
-        case 140:
-            if (curEntityType == "DIMENSION") dimTextHeight = toDouble(g.value, 2.5);
-            break;
         case 40:
             if (curEntityType == "ELLIPSE") ellipseRatio = toDouble(g.value, 1.0);
             else if (curEntityType == "TEXT") textHeight = toDouble(g.value);
             else radius = toDouble(g.value);
+            break;
+        case 41:
+            if (curEntityType == "INSERT") insertScale = toDouble(g.value, 1.0);
             break;
         case 50:
             if (curEntityType == "TEXT") textRotationDeg = toDouble(g.value);
@@ -307,6 +402,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             break;
         case 51:
             endAngleDeg = toDouble(g.value);
+            break;
+        case 62:
+            entityAci = std::abs(toInt(g.value));
+            break;
+        case 420:
+            entityTrueColor = colorFromTrueColor(toInt(g.value));
+            entityHasTrueColor = true;
             break;
         case 70:
             // Closed flag (bit 0) on the polyline header; a VERTEX's own 70
@@ -316,6 +418,15 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             } else if (curEntityType == "DIMENSION") {
                 dimType = toInt(g.value, 32);
             }
+            break;
+        case 93:
+            if (curEntityType == "HATCH") hatchVertsExpected = toInt(g.value);
+            break;
+        case 98:
+            if (curEntityType == "HATCH") hatchVertsExpected = 0; // seed points follow; stop collecting
+            break;
+        case 140:
+            if (curEntityType == "DIMENSION") dimTextHeight = toDouble(g.value, 2.5);
             break;
         case 1:
             if (curEntityType == "TEXT") textContent = g.value;
@@ -328,6 +439,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     // Tolerate a file missing its final ENDSEC/EOF by flushing whatever's pending.
     if (inLayerTable) flushLayer();
     flushEntity();
+    finalizeBlock();
 
     document = std::move(fresh);
     return true;

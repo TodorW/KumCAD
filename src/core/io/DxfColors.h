@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/document/Layer.h"
+#include "core/Color.h"
 
 namespace lcad {
 

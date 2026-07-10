@@ -54,6 +54,11 @@ private:
     // that pick entities themselves (TRIM/EXTEND).
     double pickTolerance() const;
 
+    // Instant selection-based actions (no prompt loop): HATCH fills closed
+    // polylines; EXPLODE breaks block references and polylines apart.
+    void hatchSelection();
+    void explodeSelection();
+
     lcad::Document& m_document;
     CommandLine& m_commandLine;
     DrawingView* m_view = nullptr;

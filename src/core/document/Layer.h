@@ -1,17 +1,11 @@
 #pragma once
 
+#include "core/Color.h"
 #include "core/Ids.h"
 
-#include <cstdint>
 #include <string>
 
 namespace lcad {
-
-struct Color {
-    std::uint8_t r = 255;
-    std::uint8_t g = 255;
-    std::uint8_t b = 255;
-};
 
 struct Layer {
     LayerId id = 0;

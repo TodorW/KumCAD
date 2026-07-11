@@ -6,7 +6,9 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
@@ -150,18 +152,59 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         const auto& dim = static_cast<const DimensionEntity&>(e);
         writeGroup(out, 0, "DIMENSION");
         writeCommon(out, document, e);
-        writeGroup(out, 10, dim.linePoint().x); // definition point on the dimension line
-        writeGroup(out, 20, dim.linePoint().y);
-        writeGroup(out, 30, 0.0);
-        writeGroup(out, 13, dim.point1().x); // first extension line origin
-        writeGroup(out, 23, dim.point1().y);
-        writeGroup(out, 33, 0.0);
-        writeGroup(out, 14, dim.point2().x); // second extension line origin
-        writeGroup(out, 24, dim.point2().y);
-        writeGroup(out, 34, 0.0);
-        // Type: 0 = rotated (linear), 1 = aligned; bit 32 = block-reference
-        // flag that AutoCAD always sets.
-        writeGroup(out, 70, dim.aligned() ? 33 : 32);
+        // Bit 32 = block-reference flag that AutoCAD always sets.
+        switch (dim.kind()) {
+        case DimensionKind::Linear:
+        case DimensionKind::Aligned:
+            writeGroup(out, 10, dim.linePoint().x); // definition point on the dimension line
+            writeGroup(out, 20, dim.linePoint().y);
+            writeGroup(out, 30, 0.0);
+            writeGroup(out, 13, dim.point1().x); // first extension line origin
+            writeGroup(out, 23, dim.point1().y);
+            writeGroup(out, 33, 0.0);
+            writeGroup(out, 14, dim.point2().x); // second extension line origin
+            writeGroup(out, 24, dim.point2().y);
+            writeGroup(out, 34, 0.0);
+            writeGroup(out, 70, dim.aligned() ? 33 : 32);
+            break;
+        case DimensionKind::Radius:
+        case DimensionKind::Diameter: {
+            // Radial: 10 = center, 15 = point on the curve. Diameter: 10 and
+            // 15 are opposite chord points.
+            const bool diameter = dim.kind() == DimensionKind::Diameter;
+            const Point2D first =
+                diameter ? dim.point1() * 2.0 - dim.point2() : dim.point1();
+            writeGroup(out, 10, first.x);
+            writeGroup(out, 20, first.y);
+            writeGroup(out, 30, 0.0);
+            writeGroup(out, 15, dim.point2().x);
+            writeGroup(out, 25, dim.point2().y);
+            writeGroup(out, 35, 0.0);
+            writeGroup(out, 11, dim.linePoint().x); // text midpoint
+            writeGroup(out, 21, dim.linePoint().y);
+            writeGroup(out, 31, 0.0);
+            writeGroup(out, 40, 0.0); // leader length
+            writeGroup(out, 70, (diameter ? 3 : 4) | 32);
+            break;
+        }
+        case DimensionKind::Angular:
+            // 3-point angular: 13/14 = ray points, 15 = vertex, 10 = point
+            // fixing the arc's position.
+            writeGroup(out, 10, dim.linePoint().x);
+            writeGroup(out, 20, dim.linePoint().y);
+            writeGroup(out, 30, 0.0);
+            writeGroup(out, 13, dim.point1().x);
+            writeGroup(out, 23, dim.point1().y);
+            writeGroup(out, 33, 0.0);
+            writeGroup(out, 14, dim.point2().x);
+            writeGroup(out, 24, dim.point2().y);
+            writeGroup(out, 34, 0.0);
+            writeGroup(out, 15, dim.vertex().x);
+            writeGroup(out, 25, dim.vertex().y);
+            writeGroup(out, 35, 0.0);
+            writeGroup(out, 70, 5 | 32);
+            break;
+        }
         writeGroup(out, 140, dim.textHeight()); // dim style text-height override
         break;
     }
@@ -177,17 +220,56 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         writeGroup(out, 50, text.rotation() * 180.0 / M_PI);
         break;
     }
+    case EntityType::Leader: {
+        const auto& leader = static_cast<const LeaderEntity&>(e);
+        writeGroup(out, 0, "LEADER");
+        writeCommon(out, document, e);
+        writeGroup(out, 71, 1); // arrowhead on
+        writeGroup(out, 72, 0); // straight segments
+        writeGroup(out, 73, 3); // no annotation
+        writeGroup(out, 76, static_cast<int>(leader.points().size()));
+        for (const Point2D& p : leader.points()) {
+            writeGroup(out, 10, p.x);
+            writeGroup(out, 20, p.y);
+            writeGroup(out, 30, 0.0);
+        }
+        break;
+    }
+    case EntityType::MText: {
+        const auto& mtext = static_cast<const MTextEntity&>(e);
+        writeGroup(out, 0, "MTEXT");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, mtext.position().x);
+        writeGroup(out, 20, mtext.position().y);
+        writeGroup(out, 30, 0.0);
+        writeGroup(out, 40, mtext.height());
+        writeGroup(out, 41, mtext.width());
+        writeGroup(out, 71, 1); // attachment: top left
+        writeGroup(out, 72, 1); // drawing direction: left to right
+        // Long content goes out as 250-char chunks in group 3 with the tail
+        // in group 1, per the DXF spec.
+        const std::string encoded = encodeMTextContent(mtext.text());
+        std::size_t pos = 0;
+        while (encoded.size() - pos > 250) {
+            writeGroup(out, 3, encoded.substr(pos, 250));
+            pos += 250;
+        }
+        writeGroup(out, 1, encoded.substr(pos));
+        writeGroup(out, 50, mtext.rotation() * 180.0 / M_PI);
+        break;
+    }
     case EntityType::Hatch: {
         const auto& hatch = static_cast<const HatchEntity&>(e);
+        const bool solid = hatch.pattern() == HatchPattern::Solid;
         writeGroup(out, 0, "HATCH");
         writeCommon(out, document, e);
-        writeGroup(out, 2, "SOLID");
-        writeGroup(out, 70, 1); // solid fill
-        writeGroup(out, 71, 0); // non-associative
-        writeGroup(out, 91, 1); // one boundary path
-        writeGroup(out, 92, 2); // path type: polyline
-        writeGroup(out, 72, 0); // no bulges
-        writeGroup(out, 73, 1); // closed
+        writeGroup(out, 2, hatchPatternName(hatch.pattern()));
+        writeGroup(out, 70, solid ? 1 : 0); // solid vs pattern fill
+        writeGroup(out, 71, 0);             // non-associative
+        writeGroup(out, 91, 1);             // one boundary path
+        writeGroup(out, 92, 2);             // path type: polyline
+        writeGroup(out, 72, 0);             // no bulges
+        writeGroup(out, 73, 1);             // closed
         writeGroup(out, 93, static_cast<int>(hatch.vertices().size()));
         for (const Point2D& v : hatch.vertices()) {
             writeGroup(out, 10, v.x);
@@ -196,6 +278,27 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         writeGroup(out, 97, 0); // no source boundary objects
         writeGroup(out, 75, 0); // hatch style: normal
         writeGroup(out, 76, 1); // pattern type: predefined
+        if (!solid) {
+            writeGroup(out, 52, hatch.patternAngle() * 180.0 / M_PI);
+            writeGroup(out, 41, hatch.patternScale());
+            writeGroup(out, 77, 0); // not double
+            const auto& lines = hatchPatternLines(hatch.pattern());
+            writeGroup(out, 78, static_cast<int>(lines.size()));
+            for (const HatchPatternLine& line : lines) {
+                // DXF wants final values: angles include the hatch angle, and
+                // base/offset are scaled, with the offset rotated into place.
+                const double angle = line.angleDeg * M_PI / 180.0 + hatch.patternAngle();
+                const Point2D base = rotateAround(line.base * hatch.patternScale(), Point2D(), hatch.patternAngle());
+                const Point2D offset = rotateAround(line.offset * hatch.patternScale(), Point2D(), angle);
+                writeGroup(out, 53, angle * 180.0 / M_PI);
+                writeGroup(out, 43, base.x);
+                writeGroup(out, 44, base.y);
+                writeGroup(out, 45, offset.x);
+                writeGroup(out, 46, offset.y);
+                writeGroup(out, 79, static_cast<int>(line.dashes.size()));
+                for (double dash : line.dashes) writeGroup(out, 49, dash * hatch.patternScale());
+            }
+        }
         writeGroup(out, 98, 0); // no seed points
         break;
     }
@@ -233,6 +336,12 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
     writeGroup(out, 1, "AC1015");
     writeGroup(out, 9, "$LTSCALE");
     writeGroup(out, 40, document.lineTypeScale());
+    writeGroup(out, 9, "$DIMTXT");
+    writeGroup(out, 40, document.dimStyle().textHeight);
+    writeGroup(out, 9, "$DIMASZ");
+    writeGroup(out, 40, document.dimStyle().arrowSize);
+    writeGroup(out, 9, "$DIMDEC");
+    writeGroup(out, 70, document.dimStyle().decimals);
     writeGroup(out, 0, "ENDSEC");
 
     writeGroup(out, 0, "SECTION");
@@ -275,7 +384,10 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
     writeGroup(out, 0, "ENDTAB");
     writeGroup(out, 0, "ENDSEC");
 
-    if (!document.blocks().empty()) {
+    bool anyViewports = false;
+    for (const Layout& layout : document.layouts()) anyViewports = anyViewports || !layout.viewports.empty();
+
+    if (!document.blocks().empty() || anyViewports) {
         writeGroup(out, 0, "SECTION");
         writeGroup(out, 2, "BLOCKS");
         for (const auto& block : document.blocks()) {
@@ -288,6 +400,37 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
             writeGroup(out, 30, 0.0);
             writeGroup(out, 3, block->name);
             for (const auto& child : block->entities) writeEntity(out, document, *child);
+            writeGroup(out, 0, "ENDBLK");
+            writeGroup(out, 8, "0");
+        }
+        if (anyViewports) {
+            // Layout viewports live in the *Paper_Space block, as VIEWPORT
+            // entities: sheet placement in 10/20 + 40/41, the model view in
+            // 12/22 (center) + 45 (view height in model units).
+            writeGroup(out, 0, "BLOCK");
+            writeGroup(out, 8, "0");
+            writeGroup(out, 2, "*Paper_Space");
+            writeGroup(out, 70, 0);
+            writeGroup(out, 10, 0.0);
+            writeGroup(out, 20, 0.0);
+            writeGroup(out, 30, 0.0);
+            writeGroup(out, 3, "*Paper_Space");
+            for (const Layout& layout : document.layouts()) {
+                for (const Viewport& vp : layout.viewports) {
+                    if (vp.viewScale < 1e-12) continue;
+                    writeGroup(out, 0, "VIEWPORT");
+                    writeGroup(out, 8, "0");
+                    writeGroup(out, 10, vp.paperCenter.x);
+                    writeGroup(out, 20, vp.paperCenter.y);
+                    writeGroup(out, 30, 0.0);
+                    writeGroup(out, 40, vp.paperWidth);
+                    writeGroup(out, 41, vp.paperHeight);
+                    writeGroup(out, 68, 1); // on
+                    writeGroup(out, 12, vp.modelCenter.x);
+                    writeGroup(out, 22, vp.modelCenter.y);
+                    writeGroup(out, 45, vp.paperHeight / vp.viewScale); // view height, model units
+                }
+            }
             writeGroup(out, 0, "ENDBLK");
             writeGroup(out, 8, "0");
         }

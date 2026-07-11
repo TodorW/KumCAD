@@ -26,6 +26,8 @@
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QStatusBar>
+#include <QTabBar>
+#include <QVBoxLayout>
 #include <QToolBar>
 
 #include <algorithm>
@@ -34,7 +36,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(1280, 800);
 
     m_view = new DrawingView(m_document, this);
-    setCentralWidget(m_view);
+
+    // Model/layout tabs under the canvas, like AutoCAD's space tabs.
+    auto* central = new QWidget(this);
+    auto* centralLayout = new QVBoxLayout(central);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_view, 1);
+    m_spaceTabs = new QTabBar(central);
+    m_spaceTabs->setExpanding(false);
+    m_spaceTabs->addTab(QStringLiteral("Model"));
+    for (const lcad::Layout& layout : m_document.layouts()) {
+        m_spaceTabs->addTab(QString::fromStdString(layout.name));
+    }
+    connect(m_spaceTabs, &QTabBar::currentChanged, this, [this](int index) {
+        m_view->setActiveLayoutIndex(index - 1);
+        statusBar()->showMessage(index == 0 ? QStringLiteral("Model space")
+                                            : QStringLiteral("Paper space — MVIEW places a viewport, VPSCALE sets "
+                                                             "its scale, click+drag moves it, Del removes it"),
+                                 5000);
+    });
+    centralLayout->addWidget(m_spaceTabs);
+    setCentralWidget(central);
 
     m_commandLine = new CommandLine(this);
     m_dispatcher = new CommandDispatcher(m_document, *m_commandLine, this);
@@ -320,7 +343,60 @@ void MainWindow::exportPdf() {
     statusBar()->showMessage(QStringLiteral("Exported %1").arg(QFileInfo(path).fileName()), 3000);
 }
 
+void MainWindow::renderLayout(QPrinter& printer, const lcad::Layout& layout) {
+    QPainter painter(&printer);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const QRect viewport = painter.viewport();
+    painter.fillRect(viewport, Qt::white);
+
+    // Fit the sheet to the page (the sheet itself prints without a border).
+    const double margin = 1.02;
+    const double scale =
+        std::min(viewport.width() / (layout.paperWidth * margin), viewport.height() / (layout.paperHeight * margin));
+    const QPointF pageCenter = QRectF(viewport).center();
+    const double cx = layout.paperWidth / 2.0;
+    const double cy = layout.paperHeight / 2.0;
+    const auto paperToPage = [scale, cx, cy, pageCenter](const lcad::Point2D& p) {
+        return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
+    };
+
+    const double penWidth = std::max(1.0, printer.resolution() / 72.0);
+    for (const lcad::Viewport& vp : layout.viewports) {
+        const QPointF tl = paperToPage(
+            lcad::Point2D(vp.paperCenter.x - vp.paperWidth / 2.0, vp.paperCenter.y + vp.paperHeight / 2.0));
+        const QPointF br = paperToPage(
+            lcad::Point2D(vp.paperCenter.x + vp.paperWidth / 2.0, vp.paperCenter.y - vp.paperHeight / 2.0));
+        painter.save();
+        painter.setClipRect(QRectF(tl, br).normalized());
+        const auto toScreen = [&](const lcad::Point2D& p) {
+            return paperToPage(vp.paperCenter + (p - vp.modelCenter) * vp.viewScale);
+        };
+        const double effScale = vp.viewScale * scale;
+        for (const lcad::Entity* e : m_document.entities()) {
+            const lcad::Layer* layer = m_document.findLayer(e->layer());
+            if (layer && !layer->visible) continue;
+            lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
+            if (const auto& override = e->colorOverride()) c = *override;
+            QColor color(c.r, c.g, c.b);
+            if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
+            lcad::LineType linetype = layer ? layer->linetype : lcad::LineType::Continuous;
+            if (const auto& lt = e->linetypeOverride()) linetype = *lt;
+            EntityPainter::paint(painter, *e, toScreen, effScale, color, penWidth, linetype,
+                                 m_document.lineTypeScale());
+        }
+        painter.restore();
+    }
+}
+
 void MainWindow::renderDrawing(QPrinter& printer) {
+    if (m_view->inLayoutMode()) {
+        const int index = m_view->activeLayoutIndex();
+        if (index >= 0 && index < static_cast<int>(m_document.layouts().size())) {
+            renderLayout(printer, m_document.layouts()[index]);
+            return;
+        }
+    }
+
     lcad::BoundingBox box;
     const auto entities = m_document.entities();
     for (const lcad::Entity* e : entities) {

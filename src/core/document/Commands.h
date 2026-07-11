@@ -191,6 +191,29 @@ private:
     std::vector<std::pair<EntityId, std::optional<Color>>> m_oldColors;
 };
 
+// Swaps an entity for a replacement (same id), e.g. PEDIT rewriting a
+// polyline. Owns whichever version is currently out of the document.
+class ReplaceEntityCommand : public Command {
+public:
+    ReplaceEntityCommand(Document& document, EntityId id, std::unique_ptr<Entity> replacement)
+        : m_document(document), m_id(id), m_stored(std::move(replacement)) {}
+
+    void execute() override { swap(); }
+    void undo() override { swap(); }
+    std::string description() const override { return "Edit entity"; }
+
+private:
+    void swap() {
+        std::unique_ptr<Entity> current = m_document.removeEntity(m_id);
+        m_document.addEntity(std::move(m_stored));
+        m_stored = std::move(current);
+    }
+
+    Document& m_document;
+    EntityId m_id;
+    std::unique_ptr<Entity> m_stored;
+};
+
 // Sets or clears (ByLayer) the linetype override of a set of entities, e.g.
 // from the Properties panel. Mirrors SetEntityColorCommand.
 class SetEntityLinetypeCommand : public Command {

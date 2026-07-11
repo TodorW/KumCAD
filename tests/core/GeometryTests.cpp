@@ -7,7 +7,9 @@
 #include "core/geometry/Insert.h"
 #include "core/geometry/Intersect.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/PolylineOps.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
 
@@ -618,4 +620,167 @@ TEST_CASE("Spline transforms move fit and control points together", "[geometry][
     // Grip-editing a fit point re-fits the curve through the new point.
     spline->moveGripPoint(1, lcad::Point2D(105, 10));
     REQUIRE(spline->distanceTo(lcad::Point2D(105, 10)) == Approx(0.0).margin(1e-2));
+}
+
+TEST_CASE("Hatch pattern lines are clipped to the boundary", "[geometry][hatch]") {
+    // Unit square 10x10, ANSI31 (45-degree lines every 0.125), scale 8 ->
+    // spacing sqrt(2) along the normal, lines cross the square diagonally.
+    std::vector<lcad::Point2D> square{{0, 0}, {10, 0}, {10, 10}, {0, 10}};
+    lcad::HatchEntity hatch(1, 0, square, lcad::HatchPattern::Ansi31, 8.0, 0.0);
+
+    const auto segs = hatch.patternSegments();
+    REQUIRE_FALSE(segs.empty());
+    for (const auto& [a, b] : segs) {
+        // Endpoints on/inside the square...
+        REQUIRE(a.x >= -1e-6); REQUIRE(a.x <= 10 + 1e-6);
+        REQUIRE(a.y >= -1e-6); REQUIRE(a.y <= 10 + 1e-6);
+        REQUIRE(b.x >= -1e-6); REQUIRE(b.x <= 10 + 1e-6);
+        // ...and every segment runs at 45 degrees.
+        const lcad::Point2D d = b - a;
+        REQUIRE(d.x == Approx(d.y).margin(1e-6));
+        // Midpoints are inside the region.
+        REQUIRE(hatch.containsPoint(a + d * 0.5));
+    }
+
+    // Solid hatches produce no pattern line work.
+    lcad::HatchEntity solid(2, 0, square);
+    REQUIRE(solid.patternSegments().empty());
+
+    // Rotating the hatch rotates its pattern.
+    hatch.rotate(lcad::Point2D(5, 5), M_PI / 4);
+    const auto rotated = hatch.patternSegments();
+    REQUIRE_FALSE(rotated.empty());
+    const lcad::Point2D d0 = rotated[0].second - rotated[0].first;
+    REQUIRE(std::abs(d0.x) == Approx(0.0).margin(1e-6)); // 45 + 45 = vertical
+}
+
+TEST_CASE("MText wraps, measures, and decodes content codes", "[geometry][mtext]") {
+    // 0.6 * height(2) = 1.2 per char; width 24 -> 20 chars per line.
+    lcad::MTextEntity mtext(1, 0, lcad::Point2D(0, 0), "hello world this is a long line", 2.0, 24.0);
+    const auto lines = mtext.wrappedLines();
+    REQUIRE(lines.size() == 2);
+    REQUIRE(lines[0] == "hello world this is");
+    REQUIRE(lines[1] == "a long line");
+    REQUIRE(mtext.blockHeight() == Approx(2 * 1.6 * 2.0));
+
+    // The block extends down from the top-left anchor.
+    const auto box = mtext.boundingBox();
+    REQUIRE(box.max.y == Approx(0.0).margin(1e-9));
+    REQUIRE(box.min.y == Approx(-6.4));
+    REQUIRE(mtext.distanceTo(lcad::Point2D(5, -3)) == Approx(0.0).margin(1e-9));
+
+    // Explicit newlines always break.
+    lcad::MTextEntity plain(2, 0, lcad::Point2D(0, 0), "a\nb", 2.0, 0.0);
+    REQUIRE(plain.wrappedLines().size() == 2);
+
+    // DXF/DWG content decoding.
+    REQUIRE(lcad::decodeMTextContent("first\\Psecond") == "first\nsecond");
+    REQUIRE(lcad::decodeMTextContent("{\\fArial|b0|i0;styled} plain") == "styled plain");
+    REQUIRE(lcad::decodeMTextContent("\\H2.5;big\\~gap") == "big gap");
+    REQUIRE(lcad::decodeMTextContent("\\S1^2;") == "1/2");
+    REQUIRE(lcad::encodeMTextContent("a\nb\\c") == "a\\Pb\\\\c");
+}
+
+TEST_CASE("Radial, diameter, and angular dimension geometry", "[geometry][dimension]") {
+    SECTION("radius: single arrow, R-prefixed label along the pick ray") {
+        lcad::DimensionEntity dim(1, 0, lcad::DimensionKind::Radius, lcad::Point2D(0, 0), lcad::Point2D(5, 0),
+                                  lcad::Point2D(3, 0));
+        const auto geo = dim.geometry();
+        REQUIRE(geo.value == Approx(5.0));
+        REQUIRE(geo.label == "R5.00");
+        REQUIRE_FALSE(geo.arrow1);
+        REQUIRE(geo.arrow2);
+        REQUIRE(geo.dimA.x == Approx(0.0));
+        REQUIRE(geo.dimB.x == Approx(5.0));
+    }
+    SECTION("diameter spans the full chord") {
+        lcad::DimensionEntity dim(1, 0, lcad::DimensionKind::Diameter, lcad::Point2D(10, 10),
+                                  lcad::Point2D(15, 10), lcad::Point2D(12, 10));
+        const auto geo = dim.geometry();
+        REQUIRE(geo.value == Approx(10.0));
+        REQUIRE(geo.dimA.x == Approx(5.0));
+        REQUIRE(geo.dimB.x == Approx(15.0));
+        REQUIRE(geo.arrow1);
+        REQUIRE(geo.arrow2);
+    }
+    SECTION("angular measures the sweep containing the arc pick") {
+        // Rays along +X and +Y from the origin; arc picked inside the 90-degree side.
+        lcad::DimensionEntity dim(1, 0, lcad::DimensionKind::Angular, lcad::Point2D(10, 0), lcad::Point2D(0, 10),
+                                  lcad::Point2D(4, 4), lcad::Point2D(0, 0));
+        const auto geo = dim.geometry();
+        REQUIRE(geo.angular);
+        REQUIRE(geo.value == Approx(90.0));
+        REQUIRE(geo.arcRadius == Approx(std::sqrt(32.0)));
+        // Picking the other side measures the 270-degree reflex angle.
+        lcad::DimensionEntity reflex(2, 0, lcad::DimensionKind::Angular, lcad::Point2D(10, 0),
+                                     lcad::Point2D(0, 10), lcad::Point2D(-4, -4), lcad::Point2D(0, 0));
+        REQUIRE(reflex.geometry().value == Approx(270.0));
+    }
+    SECTION("style decimals shape the label") {
+        lcad::DimensionEntity dim(1, 0, lcad::Point2D(0, 0), lcad::Point2D(7, 0), lcad::Point2D(3, 5), false);
+        dim.setStyle(3.0, 1.5, 3);
+        REQUIRE(dim.geometry().label == "7.000");
+        REQUIRE(dim.arrowSize() == Approx(1.5));
+    }
+}
+
+TEST_CASE("offsetPolyline makes a parallel copy with preserved bulges", "[geometry][polyline][offset]") {
+    // L-shape: (0,0) -> (10,0) -> (10,10), offset 1 to the upper-left side.
+    std::vector<lcad::Point2D> verts{{0, 0}, {10, 0}, {10, 10}};
+    lcad::PolylineEntity pl(1, 0, verts, false);
+
+    auto inside = lcad::offsetPolyline(pl, 2, 1.0, lcad::Point2D(5, 5));
+    REQUIRE(inside != nullptr);
+    const auto& v = inside->vertices();
+    REQUIRE(v.size() == 3);
+    REQUIRE(v[0].x == Approx(0.0));
+    REQUIRE(v[0].y == Approx(1.0)); // parallel to the horizontal leg
+    REQUIRE(v[1].x == Approx(9.0)); // miter corner
+    REQUIRE(v[1].y == Approx(1.0));
+    REQUIRE(v[2].x == Approx(9.0)); // parallel to the vertical leg
+    REQUIRE(v[2].y == Approx(10.0));
+
+    // Other side.
+    auto outside = lcad::offsetPolyline(pl, 3, 1.0, lcad::Point2D(5, -5));
+    REQUIRE(outside != nullptr);
+    REQUIRE(outside->vertices()[0].y == Approx(-1.0));
+    REQUIRE(outside->vertices()[1].x == Approx(11.0));
+
+    // Bulges survive: a semicircular segment keeps its included angle.
+    std::vector<lcad::Point2D> arcVerts{{0, 0}, {10, 0}};
+    std::vector<double> arcBulges{1.0, 0.0};
+    lcad::PolylineEntity arcPl(4, 0, arcVerts, arcBulges, false);
+    auto arcOffset = lcad::offsetPolyline(arcPl, 5, 1.0, lcad::Point2D(5, -10));
+    REQUIRE(arcOffset != nullptr);
+    REQUIRE(arcOffset->bulgeAt(0) == Approx(1.0));
+    // Offsetting away from the center grows the radius: the new chord spans wider.
+    REQUIRE(arcOffset->vertices()[1].x - arcOffset->vertices()[0].x == Approx(12.0));
+
+    // An inward offset larger than the arc radius refuses.
+    REQUIRE(lcad::offsetPolyline(arcPl, 6, 6.0, lcad::Point2D(5, -2)) == nullptr);
+}
+
+TEST_CASE("joinToPolyline chains lines and arcs into one polyline", "[geometry][polyline][join]") {
+    lcad::LineEntity l1(1, 0, lcad::Point2D(0, 0), lcad::Point2D(10, 0));
+    // Semicircle from (10,0) up to (10,10): center (10,5), CCW from -90 to +90.
+    lcad::ArcEntity arc(2, 0, lcad::Point2D(10, 5), 5.0, -M_PI / 2, M_PI / 2);
+    lcad::LineEntity l2(3, 0, lcad::Point2D(10, 10), lcad::Point2D(0, 10));
+
+    auto joined = lcad::joinToPolyline(10, 0, {&l1, &arc, &l2});
+    REQUIRE(joined != nullptr);
+    REQUIRE(joined->vertices().size() == 4);
+    REQUIRE_FALSE(joined->closed());
+    REQUIRE(joined->hasArcs());
+    REQUIRE(joined->bulgeAt(1) == Approx(1.0)); // the semicircle, CCW
+
+    // A closing fourth segment produces a closed polyline.
+    lcad::LineEntity l3(4, 0, lcad::Point2D(0, 10), lcad::Point2D(0, 0));
+    auto closed = lcad::joinToPolyline(11, 0, {&l1, &arc, &l2, &l3});
+    REQUIRE(closed != nullptr);
+    REQUIRE(closed->closed());
+    REQUIRE(closed->vertices().size() == 4);
+
+    // Disjoint pieces refuse.
+    lcad::LineEntity far(5, 0, lcad::Point2D(100, 100), lcad::Point2D(110, 100));
+    REQUIRE(lcad::joinToPolyline(12, 0, {&l1, &far}) == nullptr);
 }

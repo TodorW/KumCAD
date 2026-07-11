@@ -8,7 +8,9 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
@@ -289,18 +291,37 @@ void PropertiesPanel::refresh() {
     case lcad::EntityType::Dimension: {
         const auto* dim = static_cast<const lcad::DimensionEntity*>(e);
         m_summaryLabel->setText(QStringLiteral("Dimension"));
-        addRow(QStringLiteral("Type:"), dim->aligned() ? QStringLiteral("Aligned") : QStringLiteral("Linear"));
-        addRow(QStringLiteral("Value:"), formatNumber(dim->geometry().value));
+        QString kind;
+        switch (dim->kind()) {
+        case lcad::DimensionKind::Linear: kind = QStringLiteral("Linear"); break;
+        case lcad::DimensionKind::Aligned: kind = QStringLiteral("Aligned"); break;
+        case lcad::DimensionKind::Radius: kind = QStringLiteral("Radius"); break;
+        case lcad::DimensionKind::Diameter: kind = QStringLiteral("Diameter"); break;
+        case lcad::DimensionKind::Angular: kind = QStringLiteral("Angular"); break;
+        }
+        addRow(QStringLiteral("Type:"), kind);
+        addRow(QStringLiteral("Value:"), QString::fromUtf8(dim->geometry().label.c_str()));
         addRow(QStringLiteral("Point 1:"),
                QStringLiteral("%1, %2").arg(formatNumber(dim->point1().x), formatNumber(dim->point1().y)));
         addRow(QStringLiteral("Point 2:"),
                QStringLiteral("%1, %2").arg(formatNumber(dim->point2().x), formatNumber(dim->point2().y)));
         break;
     }
+    case lcad::EntityType::Leader: {
+        const auto* leader = static_cast<const lcad::LeaderEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Leader"));
+        addRow(QStringLiteral("Points:"), QString::number(leader->points().size()));
+        addRow(QStringLiteral("Arrow size:"), formatNumber(leader->arrowSize()));
+        break;
+    }
     case lcad::EntityType::Hatch: {
         const auto* hatch = static_cast<const lcad::HatchEntity*>(e);
         m_summaryLabel->setText(QStringLiteral("Hatch"));
-        addRow(QStringLiteral("Pattern:"), QStringLiteral("Solid"));
+        addRow(QStringLiteral("Pattern:"), QLatin1String(lcad::hatchPatternName(hatch->pattern())));
+        if (hatch->pattern() != lcad::HatchPattern::Solid) {
+            addRow(QStringLiteral("Scale:"), formatNumber(hatch->patternScale()));
+            addRow(QStringLiteral("Angle:"), formatDegrees(hatch->patternAngle()));
+        }
         addRow(QStringLiteral("Vertices:"), QString::number(hatch->vertices().size()));
         break;
     }
@@ -312,6 +333,17 @@ void PropertiesPanel::refresh() {
         addRow(QStringLiteral("Position Y:"), formatNumber(insert->position().y));
         addRow(QStringLiteral("Scale:"), formatNumber(insert->scaleFactor()));
         addRow(QStringLiteral("Rotation:"), formatDegrees(insert->rotation()));
+        break;
+    }
+    case lcad::EntityType::MText: {
+        const auto* mtext = static_cast<const lcad::MTextEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("MText"));
+        addRow(QStringLiteral("Position X:"), formatNumber(mtext->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(mtext->position().y));
+        addRow(QStringLiteral("Height:"), formatNumber(mtext->height()));
+        addRow(QStringLiteral("Width:"), formatNumber(mtext->width()));
+        addRow(QStringLiteral("Lines:"), QString::number(mtext->wrappedLines().size()));
+        addRow(QStringLiteral("Content:"), QString::fromStdString(mtext->text()));
         break;
     }
     case lcad::EntityType::Text: {

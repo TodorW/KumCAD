@@ -6,9 +6,11 @@ KumCAD follows AutoCAD's conventions wherever possible — the command line driv
 
 ## Features
 
-**Drawing** — LINE, CIRCLE, ARC (3-point), PLINE (line and tangent-arc segments, Close), SPLINE (fit-point B-spline), RECTANG, ELLIPSE, TEXT, HATCH (solid fill), and linear/aligned DIMENSIONS with arrows and live preview.
+**Drawing** — LINE, CIRCLE, ARC (3-point), PLINE (line and tangent-arc segments, Close), SPLINE (fit-point B-spline), RECTANG, ELLIPSE, TEXT, MTEXT (multiline with wrapping), HATCH (solid fill or ANSI31/32/33/37 patterns with scale and angle), LEADER (arrow + annotation), and DIMENSIONS: linear, aligned, radius, diameter, and angular, styled via DIMSTYLE (text height, arrow size, decimals).
 
-**Editing** — MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM, EXTEND, FILLET (tangent arc or sharp corner), ERASE, EXPLODE, and grip editing (drag endpoints, midpoints, centers, quadrants). Full undo/redo; multi-entity operations are single undo steps.
+**Editing** — MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET (including polylines with arcs and ellipses), TRIM, EXTEND, FILLET (tangent arc or sharp corner), ARRAY (rectangular and polar), PEDIT (Close/Open/Join/Decurve), ERASE, EXPLODE, and grip editing (drag endpoints, midpoints, centers, quadrants). Full undo/redo; multi-entity operations are single undo steps.
+
+**Layouts** — Model and paper-space tabs; MVIEW places viewports on the sheet (drag to move, VPSCALE to set the scale, Del to remove), and printing a layout plots the sheet with its viewports.
 
 **Blocks** — BLOCK turns a selection into a reusable definition; INSERT places it anywhere with scale and rotation; EXPLODE breaks it back apart.
 
@@ -16,7 +18,7 @@ KumCAD follows AutoCAD's conventions wherever possible — the command line driv
 
 **Organization** — layers with visibility, locking, colors, and linetypes; per-entity color and linetype overrides (ByLayer default); linetypes (CONTINUOUS, DASHED, DOT, DASHDOT, CENTER, HIDDEN, PHANTOM) with LTSCALE; a dockable Properties panel and Layers panel.
 
-**Input/output** — DXF read/write (including ACI and true colors, old-style POLYLINE, polyline bulges, splines, linetypes, blocks, hatches, and dimensions), DWG import via LibreDWG (optional, see below), plus fit-to-page printing and PDF export.
+**Input/output** — DXF read/write (including ACI and true colors, old-style POLYLINE, polyline bulges, splines, MTEXT, hatch patterns, leaders, all dimension kinds, linetypes, blocks, and layout viewports), DWG import via LibreDWG (optional, see below), plus fit-to-page printing and PDF export of model or layout.
 
 ## Building
 
@@ -53,4 +55,4 @@ Type a command in the command line at the bottom (or use the toolbar) and follow
 
 ## Status
 
-KumCAD is young and aims at AutoCAD LT-style 2D drafting. Not yet implemented: DWG writing, paper space/layouts, hatch patterns (solid fill only), MTEXT, radial/angular dimensions, and dimension styles. Contributions welcome.
+KumCAD is young and aims at AutoCAD LT-style 2D drafting. Not yet implemented: DWG writing, drawing directly in paper space, named dimension/text styles, tables, external references, and dynamic blocks. Contributions welcome.

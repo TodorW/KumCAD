@@ -141,7 +141,8 @@ lcad::Point2D DrawingView::resolvePointWithAnchor(const QPointF& screenPos,
                                                   const std::optional<lcad::Point2D>& orthoAnchor) {
     m_currentSnap.reset();
     m_currentSnapRef.reset();
-    if (m_osnapEnabled) {
+    // Model-entity snap points are meaningless in paper coordinates.
+    if (m_osnapEnabled && !inLayoutMode()) {
         if (auto snap = findSnapCandidate(screenPos)) {
             m_currentSnap = snap->first;
             m_currentSnapRef = snap->second;
@@ -176,10 +177,99 @@ void DrawingView::setGridSnapEnabled(bool on) {
     update();
 }
 
+void DrawingView::setActiveLayoutIndex(int index) {
+    if (index >= static_cast<int>(m_document.layouts().size())) index = -1;
+    m_layoutIndex = index;
+    m_selectedViewport = -1;
+    m_dragMode = DragMode::None;
+    if (index >= 0) {
+        // Fit the sheet on screen.
+        const lcad::Layout& layout = m_document.layouts()[index];
+        m_viewCenter = lcad::Point2D(layout.paperWidth / 2.0, layout.paperHeight / 2.0);
+        const double margin = 1.15;
+        m_scale = std::min(width() / (layout.paperWidth * margin), height() / (layout.paperHeight * margin));
+        if (m_scale <= 0 || !std::isfinite(m_scale)) m_scale = 2.0;
+    }
+    update();
+}
+
+QRectF DrawingView::viewportScreenRect(const lcad::Viewport& vp) const {
+    const QPointF tl =
+        worldToScreen(lcad::Point2D(vp.paperCenter.x - vp.paperWidth / 2.0, vp.paperCenter.y + vp.paperHeight / 2.0));
+    const QPointF br =
+        worldToScreen(lcad::Point2D(vp.paperCenter.x + vp.paperWidth / 2.0, vp.paperCenter.y - vp.paperHeight / 2.0));
+    return QRectF(tl, br).normalized();
+}
+
+int DrawingView::viewportAt(const QPointF& screenPos) const {
+    if (m_layoutIndex < 0) return -1;
+    const auto& viewports = m_document.layouts()[m_layoutIndex].viewports;
+    for (int i = static_cast<int>(viewports.size()) - 1; i >= 0; --i) {
+        if (viewportScreenRect(viewports[i]).contains(screenPos)) return i;
+    }
+    return -1;
+}
+
+void DrawingView::drawLayoutMode(QPainter& painter) {
+    const lcad::Layout& layout = m_document.layouts()[m_layoutIndex];
+
+    // The sheet, with a drop shadow.
+    const QPointF tl = worldToScreen(lcad::Point2D(0, layout.paperHeight));
+    const QPointF br = worldToScreen(lcad::Point2D(layout.paperWidth, 0));
+    const QRectF paper = QRectF(tl, br).normalized();
+    painter.fillRect(paper.translated(5, 5), QColor(0, 0, 0, 110));
+    painter.fillRect(paper, Qt::white);
+    painter.setPen(QPen(QColor(140, 140, 140), 1));
+    painter.drawRect(paper);
+
+    for (std::size_t i = 0; i < layout.viewports.size(); ++i) {
+        const lcad::Viewport& vp = layout.viewports[i];
+        const QRectF rect = viewportScreenRect(vp);
+
+        painter.save();
+        painter.setClipRect(rect.intersected(paper));
+        const auto toScreen = [this, &vp](const lcad::Point2D& p) {
+            return worldToScreen(vp.paperCenter + (p - vp.modelCenter) * vp.viewScale);
+        };
+        const double effScale = vp.viewScale * m_scale;
+        for (lcad::Entity* e : m_document.entities()) {
+            const lcad::Layer* layer = m_document.findLayer(e->layer());
+            if (layer && !layer->visible) continue;
+            lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
+            if (const auto& override = e->colorOverride()) c = *override;
+            // Light colors tuned for the dark canvas vanish on paper.
+            QColor color(c.r, c.g, c.b);
+            if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
+            lcad::LineType linetype = layer ? layer->linetype : lcad::LineType::Continuous;
+            if (const auto& lt = e->linetypeOverride()) linetype = *lt;
+            EntityPainter::paint(painter, *e, toScreen, effScale, color, 1.0, linetype,
+                                 m_document.lineTypeScale());
+        }
+        painter.restore();
+
+        const bool selected = static_cast<int>(i) == m_selectedViewport;
+        painter.setPen(QPen(selected ? QColor(80, 160, 255) : QColor(90, 90, 90), selected ? 2.0 : 1.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRect(rect);
+    }
+}
+
 void DrawingView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(rect(), QColor(33, 33, 33));
+
+    if (m_layoutIndex >= 0 && m_layoutIndex < static_cast<int>(m_document.layouts().size())) {
+        drawLayoutMode(painter);
+        drawPreview(painter); // e.g. MVIEW's rubber-band rectangle
+        if (m_lastMouseWorld) {
+            const QPointF c = worldToScreen(*m_lastMouseWorld);
+            painter.setPen(QPen(QColor(120, 120, 120), 1));
+            painter.drawLine(QPointF(c.x() - 10, c.y()), QPointF(c.x() + 10, c.y()));
+            painter.drawLine(QPointF(c.x(), c.y() - 10), QPointF(c.x(), c.y() + 10));
+        }
+        return;
+    }
 
     drawGrid(painter);
 
@@ -431,6 +521,21 @@ void DrawingView::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
+        if (inLayoutMode()) {
+            // Layout mode: click selects a viewport and starts dragging it.
+            const int hitViewport = viewportAt(event->position());
+            m_selectedViewport = hitViewport;
+            if (hitViewport >= 0) {
+                const lcad::Viewport& vp = m_document.layouts()[m_layoutIndex].viewports[hitViewport];
+                m_dragMode = DragMode::MoveViewport;
+                m_dragStartScreen = event->position();
+                m_dragCurrentScreen = event->position();
+                m_viewportDragOffset = vp.paperCenter - worldPt;
+            }
+            update();
+            return;
+        }
+
         if (auto grip = hitTestGrip(event->position())) {
             m_dragMode = DragMode::Grip;
             m_gripEntityId = grip->first;
@@ -504,6 +609,15 @@ void DrawingView::mouseMoveEvent(QMouseEvent* event) {
         update();
         return;
     }
+    if (m_dragMode == DragMode::MoveViewport && inLayoutMode() && m_selectedViewport >= 0) {
+        auto& viewports = m_document.layouts()[m_layoutIndex].viewports;
+        if (m_selectedViewport < static_cast<int>(viewports.size())) {
+            viewports[m_selectedViewport].paperCenter = worldPt + m_viewportDragOffset;
+        }
+        m_dragCurrentScreen = event->position();
+        update();
+        return;
+    }
     if (m_dragMode == DragMode::MoveSelection || m_dragMode == DragMode::Grip) {
         m_dragCurrentScreen = event->position();
         // Drags honor the drafting aids too: osnap onto other geometry, ortho
@@ -525,6 +639,10 @@ void DrawingView::mouseMoveEvent(QMouseEvent* event) {
     }
 
     m_currentSnap.reset(); // no active command: no snap marker while idle/hovering
+    if (inLayoutMode()) {
+        update();
+        return;
+    }
     lcad::Entity* hit = hitTestEntity(worldPt);
     m_hoverEntityId = hit ? std::optional<lcad::EntityId>(hit->id()) : std::nullopt;
     update();
@@ -550,6 +668,14 @@ void DrawingView::mouseReleaseEvent(QMouseEvent* event) {
             updateSelectionFromBox(QRectF(m_dragStartScreen, m_dragCurrentScreen).normalized(), crossing);
         }
         emit selectionChanged();
+        update();
+        return;
+    }
+
+    if (m_dragMode == DragMode::MoveViewport) {
+        m_dragMode = DragMode::None;
+        const QPointF screenDelta = m_dragCurrentScreen - m_dragStartScreen;
+        if (std::abs(screenDelta.x()) >= 3 || std::abs(screenDelta.y()) >= 3) emit documentEdited();
         update();
         return;
     }
@@ -599,6 +725,16 @@ void DrawingView::wheelEvent(QWheelEvent* event) {
 
 void DrawingView::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Delete) {
+        if (inLayoutMode()) {
+            auto& viewports = m_document.layouts()[m_layoutIndex].viewports;
+            if (m_selectedViewport >= 0 && m_selectedViewport < static_cast<int>(viewports.size())) {
+                viewports.erase(viewports.begin() + m_selectedViewport);
+                m_selectedViewport = -1;
+                emit documentEdited();
+            }
+            update();
+            return;
+        }
         eraseSelection();
         update();
         return;

@@ -5,7 +5,9 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
@@ -505,4 +507,138 @@ TEST_CASE("DXF spline round-trips exactly (control points + knots + fit points)"
         REQUIRE(loadedSpline->knots()[i] == Approx(originalKnots[i]).margin(1e-9));
     }
     REQUIRE(loadedSpline->fitPoints().size() == fit.size());
+}
+
+TEST_CASE("DXF hatch pattern round-trips", "[dxf][hatch]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    std::vector<lcad::Point2D> square{{0, 0}, {10, 0}, {10, 10}, {0, 10}};
+    doc.addEntity(std::make_unique<lcad::HatchEntity>(doc.reserveEntityId(), doc.currentLayer(), square,
+                                                      lcad::HatchPattern::Ansi33, 2.0, M_PI / 6));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 1);
+    const auto* hatch = static_cast<const lcad::HatchEntity*>(entities[0]);
+    REQUIRE(hatch->pattern() == lcad::HatchPattern::Ansi33);
+    REQUIRE(hatch->patternScale() == Approx(2.0));
+    REQUIRE(hatch->patternAngle() == Approx(M_PI / 6));
+    REQUIRE(hatch->vertices().size() == 4);
+}
+
+TEST_CASE("DXF MTEXT round-trips", "[dxf][mtext]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addEntity(std::make_unique<lcad::MTextEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                      lcad::Point2D(5, 7), "line one\nline two", 2.5, 60.0,
+                                                      M_PI / 12));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 1);
+    REQUIRE(entities[0]->type() == lcad::EntityType::MText);
+    const auto* mtext = static_cast<const lcad::MTextEntity*>(entities[0]);
+    REQUIRE(mtext->text() == "line one\nline two");
+    REQUIRE(mtext->position().x == Approx(5.0));
+    REQUIRE(mtext->position().y == Approx(7.0));
+    REQUIRE(mtext->height() == Approx(2.5));
+    REQUIRE(mtext->width() == Approx(60.0));
+    REQUIRE(mtext->rotation() == Approx(M_PI / 12));
+}
+
+TEST_CASE("DXF radial/diameter/angular dimensions and dim style round-trip", "[dxf][dimension]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.dimStyle().textHeight = 4.0;
+    doc.dimStyle().arrowSize = 2.0;
+    doc.dimStyle().decimals = 3;
+    doc.addEntity(std::make_unique<lcad::DimensionEntity>(doc.reserveEntityId(), 0, lcad::DimensionKind::Radius,
+                                                          lcad::Point2D(0, 0), lcad::Point2D(5, 0),
+                                                          lcad::Point2D(3, 0)));
+    doc.addEntity(std::make_unique<lcad::DimensionEntity>(doc.reserveEntityId(), 0, lcad::DimensionKind::Diameter,
+                                                          lcad::Point2D(10, 10), lcad::Point2D(15, 10),
+                                                          lcad::Point2D(12, 10)));
+    doc.addEntity(std::make_unique<lcad::DimensionEntity>(doc.reserveEntityId(), 0, lcad::DimensionKind::Angular,
+                                                          lcad::Point2D(10, 0), lcad::Point2D(0, 10),
+                                                          lcad::Point2D(4, 4), lcad::Point2D(0, 0)));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    REQUIRE(loaded.dimStyle().textHeight == Approx(4.0));
+    REQUIRE(loaded.dimStyle().arrowSize == Approx(2.0));
+    REQUIRE(loaded.dimStyle().decimals == 3);
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 3);
+
+    const auto* radius = static_cast<const lcad::DimensionEntity*>(entities[0]);
+    REQUIRE(radius->kind() == lcad::DimensionKind::Radius);
+    REQUIRE(radius->geometry().value == Approx(5.0));
+
+    const auto* diameter = static_cast<const lcad::DimensionEntity*>(entities[1]);
+    REQUIRE(diameter->kind() == lcad::DimensionKind::Diameter);
+    REQUIRE(diameter->point1().x == Approx(10.0)); // center reconstructed from the chord
+    REQUIRE(diameter->geometry().value == Approx(10.0));
+
+    const auto* angular = static_cast<const lcad::DimensionEntity*>(entities[2]);
+    REQUIRE(angular->kind() == lcad::DimensionKind::Angular);
+    REQUIRE(angular->vertex().x == Approx(0.0).margin(1e-9));
+    REQUIRE(angular->geometry().value == Approx(90.0));
+}
+
+TEST_CASE("DXF leader round-trips", "[dxf][leader]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    std::vector<lcad::Point2D> pts{{0, 0}, {5, 5}, {10, 5}};
+    doc.addEntity(std::make_unique<lcad::LeaderEntity>(doc.reserveEntityId(), doc.currentLayer(), pts, 2.0));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 1);
+    REQUIRE(entities[0]->type() == lcad::EntityType::Leader);
+    const auto* leader = static_cast<const lcad::LeaderEntity*>(entities[0]);
+    REQUIRE(leader->points().size() == 3);
+    REQUIRE(leader->points()[1].x == Approx(5.0));
+    REQUIRE(leader->points()[1].y == Approx(5.0));
+}
+
+TEST_CASE("DXF layout viewports round-trip via *Paper_Space", "[dxf][layout]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addEntity(std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0),
+                                                       lcad::Point2D(100, 100)));
+    REQUIRE_FALSE(doc.layouts().empty());
+    doc.layouts().front().viewports.push_back(
+        lcad::Viewport{lcad::Point2D(148.5, 105.0), 200.0, 150.0, lcad::Point2D(50, 50), 0.5});
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    REQUIRE(loaded.entities().size() == 1); // the line; the viewport isn't an entity
+    REQUIRE(loaded.blocks().empty());       // *Paper_Space isn't a user block
+    REQUIRE_FALSE(loaded.layouts().empty());
+    const auto& viewports = loaded.layouts().front().viewports;
+    REQUIRE(viewports.size() == 1);
+    REQUIRE(viewports[0].paperCenter.x == Approx(148.5));
+    REQUIRE(viewports[0].paperWidth == Approx(200.0));
+    REQUIRE(viewports[0].paperHeight == Approx(150.0));
+    REQUIRE(viewports[0].modelCenter.x == Approx(50.0));
+    REQUIRE(viewports[0].viewScale == Approx(0.5));
 }

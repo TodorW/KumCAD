@@ -6,12 +6,15 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
 #include "core/io/DxfColors.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -130,8 +133,12 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::vector<std::unique_ptr<Entity>> curBlockEntities;
 
     auto finalizeBlock = [&]() {
-        if (curBlockName.empty()) {
+        // Pseudo-blocks (*Model_Space, *Paper_Space, anonymous) aren't user
+        // block definitions; their contents were already routed elsewhere.
+        if (curBlockName.empty() || curBlockName[0] == '*') {
             curBlockEntities.clear();
+            curBlockName.clear();
+            curBlockBase = Point2D();
             return;
         }
         // Normalize child geometry to be base-point-relative.
@@ -147,7 +154,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
 
     std::string curEntityType;
     std::string curLayerRef = "0";
-    Point2D p10, p11, p13, p14;
+    Point2D p10, p11, p13, p14, p15;
     int dimType = 32;
     double dimTextHeight = 2.5;
     double radius = 0.0;
@@ -163,9 +170,20 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double textHeight = 0.0;
     double textRotationDeg = 0.0;
     std::string textContent;
+    double mtextWidth = 0.0;
+    int mtextAttachment = 1;
+    std::string mtextChunks; // accumulated group 3 chunks; group 1 appends the tail
     int hatchVertsExpected = 0;
+    std::string hatchPatternNameStr = "SOLID";
+    bool hatchSolid = true;
+    double hatchAngleDeg = 0.0;
+    double hatchScale = 1.0;
     std::string insertName;
     double insertScale = 1.0;
+    Point2D vpViewCenter; // VIEWPORT group 12/22
+    double vpViewHeight = 0.0;
+    double vpWidth = 0.0;
+    double vpHeight = 0.0;
     int splineDegree = 3;
     std::vector<double> splineKnots;
     std::vector<Point2D> splineFit;
@@ -215,11 +233,68 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         } else if (curEntityType == "TEXT" && !textContent.empty()) {
             made = std::make_unique<TextEntity>(id, layerId, p10, textContent, textHeight,
                                                 textRotationDeg * M_PI / 180.0);
+        } else if (curEntityType == "MTEXT") {
+            const std::string content = decodeMTextContent(mtextChunks + textContent);
+            if (!content.empty() && textHeight > 1e-12) {
+                auto mtext = std::make_unique<MTextEntity>(id, layerId, p10, content, textHeight, mtextWidth,
+                                                           textRotationDeg * M_PI / 180.0);
+                // Group 10 is the attachment point (71); we store top-left,
+                // so shift by the block extents for the other anchors.
+                const int col = (mtextAttachment - 1) % 3; // 0 left, 1 center, 2 right
+                const int row = (mtextAttachment - 1) / 3; // 0 top, 1 middle, 2 bottom
+                if (col != 0 || row != 0) {
+                    const double w = mtext->blockWidth();
+                    const double h = mtext->blockHeight();
+                    const Point2D shift(-w * col / 2.0, h * row / 2.0);
+                    mtext->translate(rotateAround(shift, Point2D(), mtext->rotation()));
+                }
+                made = std::move(mtext);
+            }
         } else if (curEntityType == "DIMENSION") {
-            const bool aligned = (dimType & 7) == 1; // low bits: 0 = rotated/linear, 1 = aligned
-            made = std::make_unique<DimensionEntity>(id, layerId, p13, p14, p10, aligned, dimTextHeight);
+            std::unique_ptr<DimensionEntity> dim;
+            switch (dimType & 7) { // low bits select the dimension kind
+            case 3: { // diameter: 10 and 15 are opposite chord points
+                const Point2D center = (p10 + p15) * 0.5;
+                const Point2D textAt = p11.distanceTo(Point2D()) > 1e-12 ? p11 : p15;
+                dim = std::make_unique<DimensionEntity>(id, layerId, DimensionKind::Diameter, center, p15, textAt);
+                break;
+            }
+            case 4: { // radius: 10 = center, 15 = point on the curve
+                const Point2D textAt = p11.distanceTo(Point2D()) > 1e-12 ? p11 : p15;
+                dim = std::make_unique<DimensionEntity>(id, layerId, DimensionKind::Radius, p10, p15, textAt);
+                break;
+            }
+            case 5: // 3-point angular: 13/14 = rays, 15 = vertex, 10 = arc point
+                dim = std::make_unique<DimensionEntity>(id, layerId, DimensionKind::Angular, p13, p14, p10, p15);
+                break;
+            case 1: // aligned
+                dim = std::make_unique<DimensionEntity>(id, layerId, p13, p14, p10, true);
+                break;
+            default: // rotated/linear (and kinds we don't model yet)
+                dim = std::make_unique<DimensionEntity>(id, layerId, p13, p14, p10, false);
+                break;
+            }
+            dim->setStyle(dimTextHeight, fresh.dimStyle().arrowSize, fresh.dimStyle().decimals);
+            made = std::move(dim);
         } else if (curEntityType == "HATCH" && polyVerts.size() >= 3) {
-            made = std::make_unique<HatchEntity>(id, layerId, polyVerts);
+            HatchPattern pattern = HatchPattern::Solid;
+            if (!hatchSolid) {
+                // Unknown pattern names degrade to ANSI31 so the region still
+                // reads as hatched rather than silently going solid.
+                pattern = hatchPatternFromName(hatchPatternNameStr).value_or(HatchPattern::Ansi31);
+            }
+            made = std::make_unique<HatchEntity>(id, layerId, polyVerts, pattern, hatchScale,
+                                                 hatchAngleDeg * M_PI / 180.0);
+        } else if (curEntityType == "VIEWPORT") {
+            // Only paper-space viewports (from *Paper_Space) become layout
+            // viewports; the model-space VIEWPORT some writers emit is skipped.
+            if (inBlockBody && !curBlockName.empty() && curBlockName[0] == '*' && vpWidth > 1e-9 &&
+                vpHeight > 1e-9 && vpViewHeight > 1e-9 && !fresh.layouts().empty()) {
+                fresh.layouts().front().viewports.push_back(
+                    Viewport{p10, vpWidth, vpHeight, vpViewCenter, vpHeight / vpViewHeight});
+            }
+        } else if (curEntityType == "LEADER" && polyVerts.size() >= 2) {
+            made = std::make_unique<LeaderEntity>(id, layerId, polyVerts, fresh.dimStyle().arrowSize);
         } else if (curEntityType == "SPLINE" && polyVerts.size() >= 2) {
             // Control points were collected into polyVerts. Prefer the exact
             // control-point + knot form; fall back to re-fitting from fit
@@ -260,6 +335,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         p11 = Point2D();
         p13 = Point2D();
         p14 = Point2D();
+        p15 = Point2D();
         dimType = 32;
         dimTextHeight = 2.5;
         radius = 0.0;
@@ -274,13 +350,24 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         textHeight = 0.0;
         textRotationDeg = 0.0;
         textContent.clear();
+        mtextWidth = 0.0;
+        mtextAttachment = 1;
+        mtextChunks.clear();
         hatchVertsExpected = 0;
+        hatchPatternNameStr = "SOLID";
+        hatchSolid = true;
+        hatchAngleDeg = 0.0;
+        hatchScale = 1.0;
         insertName.clear();
         insertScale = 1.0;
         splineDegree = 3;
         splineKnots.clear();
         splineFit.clear();
         havePendingFitX = false;
+        vpViewCenter = Point2D();
+        vpViewHeight = 0.0;
+        vpWidth = 0.0;
+        vpHeight = 0.0;
         entityAci = 0;
         entityHasTrueColor = false;
         entityLinetypeName.clear();
@@ -347,6 +434,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curBlockName = g.value;
             } else if (entityContext && curEntityType == "INSERT") {
                 insertName = g.value;
+            } else if (entityContext && curEntityType == "HATCH") {
+                hatchPatternNameStr = g.value;
             }
             continue;
         }
@@ -356,6 +445,14 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curHeaderVar = g.value;
             } else if (g.code == 40 && curHeaderVar == "$LTSCALE") {
                 fresh.setLineTypeScale(toDouble(g.value, 1.0));
+            } else if (g.code == 40 && curHeaderVar == "$DIMTXT") {
+                const double v = toDouble(g.value, 2.5);
+                if (v > 1e-9) fresh.dimStyle().textHeight = v;
+            } else if (g.code == 40 && curHeaderVar == "$DIMASZ") {
+                const double v = toDouble(g.value, 1.25);
+                if (v > 1e-9) fresh.dimStyle().arrowSize = v;
+            } else if (g.code == 70 && curHeaderVar == "$DIMDEC") {
+                fresh.dimStyle().decimals = std::clamp(toInt(g.value, 2), 0, 8);
             }
             continue;
         }
@@ -394,7 +491,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             curLayerRef = g.value;
             break;
         case 10:
-            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || inVertex) {
+            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" || inVertex) {
                 pendingVertX = toDouble(g.value);
                 havePendingVertX = true;
             } else if (curEntityType == "HATCH") {
@@ -407,7 +504,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             }
             break;
         case 20:
-            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || inVertex || curEntityType == "HATCH") {
+            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" || inVertex ||
+                curEntityType == "HATCH") {
                 if (havePendingVertX) {
                     polyVerts.emplace_back(pendingVertX, toDouble(g.value));
                     polyBulges.push_back(0.0); // a following group 42 may overwrite this
@@ -448,14 +546,33 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         case 24:
             p14.y = toDouble(g.value);
             break;
+        case 15:
+            p15.x = toDouble(g.value);
+            break;
+        case 25:
+            p15.y = toDouble(g.value);
+            break;
         case 40:
             if (curEntityType == "ELLIPSE") ellipseRatio = toDouble(g.value, 1.0);
-            else if (curEntityType == "TEXT") textHeight = toDouble(g.value);
+            else if (curEntityType == "TEXT" || curEntityType == "MTEXT") textHeight = toDouble(g.value);
             else if (curEntityType == "SPLINE") splineKnots.push_back(toDouble(g.value));
+            else if (curEntityType == "VIEWPORT") vpWidth = toDouble(g.value);
             else radius = toDouble(g.value);
             break;
         case 41:
             if (curEntityType == "INSERT") insertScale = toDouble(g.value, 1.0);
+            else if (curEntityType == "HATCH") hatchScale = toDouble(g.value, 1.0);
+            else if (curEntityType == "MTEXT") mtextWidth = toDouble(g.value);
+            else if (curEntityType == "VIEWPORT") vpHeight = toDouble(g.value);
+            break;
+        case 12:
+            if (curEntityType == "VIEWPORT") vpViewCenter.x = toDouble(g.value);
+            break;
+        case 22:
+            if (curEntityType == "VIEWPORT") vpViewCenter.y = toDouble(g.value);
+            break;
+        case 45:
+            if (curEntityType == "VIEWPORT") vpViewHeight = toDouble(g.value);
             break;
         case 42:
             // Segment bulge, on LWPOLYLINE vertices and old-style VERTEX
@@ -465,11 +582,14 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             }
             break;
         case 50:
-            if (curEntityType == "TEXT") textRotationDeg = toDouble(g.value);
+            if (curEntityType == "TEXT" || curEntityType == "MTEXT") textRotationDeg = toDouble(g.value);
             else startAngleDeg = toDouble(g.value);
             break;
         case 51:
             endAngleDeg = toDouble(g.value);
+            break;
+        case 52:
+            if (curEntityType == "HATCH") hatchAngleDeg = toDouble(g.value);
             break;
         case 62:
             entityAci = std::abs(toInt(g.value));
@@ -485,10 +605,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 closed = (toInt(g.value) & 1) != 0;
             } else if (curEntityType == "DIMENSION") {
                 dimType = toInt(g.value, 32);
+            } else if (curEntityType == "HATCH") {
+                hatchSolid = (toInt(g.value) & 1) != 0;
             }
             break;
         case 71:
             if (curEntityType == "SPLINE") splineDegree = std::max(1, toInt(g.value, 3));
+            else if (curEntityType == "MTEXT") mtextAttachment = toInt(g.value, 1);
             break;
         case 93:
             if (curEntityType == "HATCH") hatchVertsExpected = toInt(g.value);
@@ -500,7 +623,10 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             if (curEntityType == "DIMENSION") dimTextHeight = toDouble(g.value, 2.5);
             break;
         case 1:
-            if (curEntityType == "TEXT") textContent = g.value;
+            if (curEntityType == "TEXT" || curEntityType == "MTEXT") textContent = g.value;
+            break;
+        case 3:
+            if (curEntityType == "MTEXT") mtextChunks += g.value;
             break;
         default:
             break;

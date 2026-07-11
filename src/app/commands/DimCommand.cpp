@@ -25,6 +25,8 @@ std::optional<QString> DimCommand::onPoint(const lcad::Point2D& pt) {
 
     const auto id = m_document.reserveEntityId();
     auto entity = std::make_unique<lcad::DimensionEntity>(id, m_document.currentLayer(), m_p1, m_p2, pt, m_aligned);
+    const lcad::DimStyle& style = m_document.dimStyle();
+    entity->setStyle(style.textHeight, style.arrowSize, style.decimals);
     entity->setAnchor1(m_ref1);
     entity->setAnchor2(m_ref2);
     const double value = entity->geometry().value;

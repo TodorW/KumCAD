@@ -1,19 +1,36 @@
 #pragma once
 
 #include "core/geometry/Entity.h"
+#include "core/geometry/HatchPattern.h"
 
 #include <vector>
 
 namespace lcad {
 
-// Solid-filled closed polygon region, the SOLID-pattern subset of AutoCAD's
-// HATCH. Boundary vertices are implicitly closed (last connects to first).
+// Closed polygon region filled solid or with a line-family pattern (the
+// AutoCAD HATCH). Boundary vertices are implicitly closed (last connects to
+// first). Pattern hatches keep the acad.pat geometry (see HatchPattern.h)
+// transformed by patternScale/patternAngle.
 class HatchEntity : public Entity {
 public:
     HatchEntity(EntityId id, LayerId layer, std::vector<Point2D> vertices)
         : Entity(id, layer), m_vertices(std::move(vertices)) {}
 
+    HatchEntity(EntityId id, LayerId layer, std::vector<Point2D> vertices, HatchPattern pattern, double patternScale,
+                double patternAngle)
+        : Entity(id, layer), m_vertices(std::move(vertices)), m_pattern(pattern), m_patternScale(patternScale),
+          m_patternAngle(patternAngle) {}
+
     const std::vector<Point2D>& vertices() const { return m_vertices; }
+
+    HatchPattern pattern() const { return m_pattern; }
+    double patternScale() const { return m_patternScale; }
+    double patternAngle() const { return m_patternAngle; } // radians, added to each family's own angle
+
+    // The pattern's line work clipped to the boundary (even-odd), as world
+    // segments -- what the renderer draws for non-solid patterns. Capped to a
+    // sane segment count so absurd scales can't hang the app.
+    std::vector<std::pair<Point2D, Point2D>> patternSegments() const;
 
     // Point-in-polygon (ray casting); picking a hatch anywhere inside hits it.
     bool containsPoint(const Point2D& pt) const;
@@ -32,6 +49,9 @@ public:
 
 private:
     std::vector<Point2D> m_vertices;
+    HatchPattern m_pattern = HatchPattern::Solid;
+    double m_patternScale = 1.0;
+    double m_patternAngle = 0.0;
 };
 
 } // namespace lcad

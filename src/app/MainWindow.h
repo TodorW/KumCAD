@@ -13,6 +13,7 @@ class LayerPanel;
 class PropertiesPanel;
 class QLabel;
 class QPrinter;
+class QTabBar;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -41,9 +42,11 @@ private:
 
     void printDocument();
     void exportPdf();
-    // Fit-to-page rendering of all visible entities onto paper (white
-    // background, near-white colors mapped to black).
+    // Fit-to-page rendering onto paper (white background, near-white colors
+    // mapped to black): model extents in model space, or the active layout's
+    // sheet with its viewports when a layout tab is current.
     void renderDrawing(QPrinter& printer);
+    void renderLayout(QPrinter& printer, const lcad::Layout& layout);
 
     lcad::Document m_document;
     DrawingView* m_view = nullptr;
@@ -51,6 +54,7 @@ private:
     CommandDispatcher* m_dispatcher = nullptr;
     LayerPanel* m_layerPanel = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
+    QTabBar* m_spaceTabs = nullptr;
     QLabel* m_coordLabel = nullptr;
     QLabel* m_osnapLabel = nullptr;
     QLabel* m_orthoLabel = nullptr;

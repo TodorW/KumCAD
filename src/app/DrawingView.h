@@ -35,6 +35,14 @@ public:
     void eraseSelection();
     void selectAll();
 
+    // Paper-space layout mode: -1 shows model space, >= 0 the document's
+    // layout at that index (paper sheet + viewports). Model editing tools are
+    // inactive in layout mode; viewports are click-selected and dragged.
+    void setActiveLayoutIndex(int index);
+    int activeLayoutIndex() const { return m_layoutIndex; }
+    bool inLayoutMode() const { return m_layoutIndex >= 0; }
+    int selectedViewportIndex() const { return m_selectedViewport; }
+
     // Drops selected entities whose layer has become locked or hidden (e.g.
     // after a Layers-panel change), matching click-select's rules.
     void pruneSelectionForLayerState();
@@ -78,9 +86,13 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
-    enum class DragMode { None, BoxSelect, MoveSelection, Grip };
+    enum class DragMode { None, BoxSelect, MoveSelection, Grip, MoveViewport };
 
     void drawGrid(QPainter& painter);
+    void drawLayoutMode(QPainter& painter);
+    // Screen rectangle of a viewport on the current sheet.
+    QRectF viewportScreenRect(const lcad::Viewport& vp) const;
+    int viewportAt(const QPointF& screenPos) const;
     void drawEntity(QPainter& painter, const lcad::Entity& entity, const QColor& color, double penWidth);
     void drawGrips(QPainter& painter);
     void drawPreview(QPainter& painter);
@@ -134,4 +146,8 @@ private:
     // Which entity snap point the last resolvePoint() osnap hit came from,
     // handed to the dispatcher so commands can record associativity.
     std::optional<lcad::SnapRef> m_currentSnapRef;
+
+    int m_layoutIndex = -1;      // -1 = model space
+    int m_selectedViewport = -1; // selected viewport in the active layout
+    lcad::Point2D m_viewportDragOffset{0.0, 0.0};
 };

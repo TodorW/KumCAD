@@ -6,7 +6,9 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
@@ -141,31 +143,48 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         const auto& dim = static_cast<const lcad::DimensionEntity&>(entity);
         const auto geo = dim.geometry();
 
-        painter.drawLine(toScreen(geo.ext1A), toScreen(geo.ext1B));
-        painter.drawLine(toScreen(geo.ext2A), toScreen(geo.ext2B));
-        painter.drawLine(toScreen(geo.dimA), toScreen(geo.dimB));
+        if (geo.ext1A.distanceTo(geo.ext1B) > 1e-9) painter.drawLine(toScreen(geo.ext1A), toScreen(geo.ext1B));
+        if (geo.ext2A.distanceTo(geo.ext2B) > 1e-9) painter.drawLine(toScreen(geo.ext2A), toScreen(geo.ext2B));
 
-        // Arrowheads: slim filled triangles at the dimension line's ends,
-        // pointing outward, sized relative to the label text.
-        const lcad::Point2D span = geo.dimB - geo.dimA;
-        const double spanLen = span.length();
-        if (spanLen > 1e-9) {
-            const lcad::Point2D dir = span * (1.0 / spanLen);
-            const lcad::Point2D normal(-dir.y, dir.x);
-            const double arrow = 0.5 * dim.textHeight();
-            auto drawArrow = [&](const lcad::Point2D& tip, const lcad::Point2D& inward) {
-                QPolygonF tri;
-                tri << toScreen(tip) << toScreen(tip + inward * arrow + normal * (arrow / 3.0))
-                    << toScreen(tip + inward * arrow - normal * (arrow / 3.0));
-                painter.setBrush(color);
-                painter.drawPolygon(tri);
-                painter.setBrush(Qt::NoBrush);
+        // Arrowheads: slim filled triangles pointing outward along the given
+        // inward direction, sized by the entity's arrow-size style.
+        const double arrow = dim.arrowSize();
+        auto drawArrow = [&](const lcad::Point2D& tip, const lcad::Point2D& inward) {
+            const lcad::Point2D normal(-inward.y, inward.x);
+            QPolygonF tri;
+            tri << toScreen(tip) << toScreen(tip + inward * arrow + normal * (arrow / 3.0))
+                << toScreen(tip + inward * arrow - normal * (arrow / 3.0));
+            painter.setBrush(color);
+            painter.drawPolygon(tri);
+            painter.setBrush(Qt::NoBrush);
+        };
+
+        if (geo.angular) {
+            // The dimension line is an arc about the measured vertex.
+            const QPointF c = toScreen(geo.arcCenter);
+            const double r = geo.arcRadius * scale;
+            const QRectF bounds(c.x() - r, c.y() - r, 2 * r, 2 * r);
+            const double startDeg = qRadiansToDegrees(geo.arcStartAngle);
+            const double spanDeg = qRadiansToDegrees(geo.arcEndAngle - geo.arcStartAngle);
+            painter.drawArc(bounds, static_cast<int>(startDeg * 16), static_cast<int>(spanDeg * 16));
+            // Arrow tips point along the arc's tangents.
+            auto tangent = [&](double angle, double sign) {
+                return lcad::Point2D(-std::sin(angle), std::cos(angle)) * sign;
             };
-            drawArrow(geo.dimA, dir);
-            drawArrow(geo.dimB, dir * -1.0);
+            if (geo.arrow1) drawArrow(geo.dimA, tangent(geo.arcStartAngle, 1.0));
+            if (geo.arrow2) drawArrow(geo.dimB, tangent(geo.arcEndAngle, -1.0));
+        } else {
+            painter.drawLine(toScreen(geo.dimA), toScreen(geo.dimB));
+            const lcad::Point2D span = geo.dimB - geo.dimA;
+            const double spanLen = span.length();
+            if (spanLen > 1e-9) {
+                const lcad::Point2D dir = span * (1.0 / spanLen);
+                if (geo.arrow1) drawArrow(geo.dimA, dir);
+                if (geo.arrow2) drawArrow(geo.dimB, dir * -1.0);
+            }
         }
 
-        const QString label = QString::number(geo.value, 'f', 2);
+        const QString label = QString::fromUtf8(geo.label.c_str());
         QFont font = painter.font();
         font.setPixelSize(std::max(1, static_cast<int>(std::round(dim.textHeight() * scale))));
         painter.save();
@@ -193,13 +212,65 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         painter.restore();
         break;
     }
+    case lcad::EntityType::Leader: {
+        const auto& leader = static_cast<const lcad::LeaderEntity&>(entity);
+        const auto& pts = leader.points();
+        if (pts.size() < 2) break;
+        for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+            painter.drawLine(toScreen(pts[i]), toScreen(pts[i + 1]));
+        }
+        // Arrowhead at the first point, aimed back along the first segment.
+        const lcad::Point2D span = pts[1] - pts[0];
+        const double len = span.length();
+        if (len > 1e-9) {
+            const lcad::Point2D dir = span * (1.0 / len);
+            const lcad::Point2D normal(-dir.y, dir.x);
+            const double arrow = leader.arrowSize();
+            QPolygonF tri;
+            tri << toScreen(pts[0]) << toScreen(pts[0] + dir * arrow + normal * (arrow / 3.0))
+                << toScreen(pts[0] + dir * arrow - normal * (arrow / 3.0));
+            painter.setBrush(color);
+            painter.drawPolygon(tri);
+            painter.setBrush(Qt::NoBrush);
+        }
+        break;
+    }
+    case lcad::EntityType::MText: {
+        const auto& mtext = static_cast<const lcad::MTextEntity&>(entity);
+        QFont font = painter.font();
+        font.setPixelSize(std::max(1, static_cast<int>(std::round(mtext.height() * scale))));
+        painter.save();
+        painter.setFont(font);
+        painter.translate(toScreen(mtext.position()));
+        painter.rotate(-qRadiansToDegrees(mtext.rotation())); // same sign flip as the Text case
+        const double advance = mtext.lineAdvance() * scale;
+        const QFontMetricsF metrics(font);
+        double y = metrics.ascent(); // first baseline sits one ascent below the top-left anchor
+        for (const std::string& line : mtext.wrappedLines()) {
+            painter.drawText(QPointF(0, y), QString::fromStdString(line));
+            y += advance;
+        }
+        painter.restore();
+        break;
+    }
     case lcad::EntityType::Hatch: {
         const auto& hatch = static_cast<const lcad::HatchEntity&>(entity);
-        QPolygonF poly;
-        for (const lcad::Point2D& v : hatch.vertices()) poly << toScreen(v);
-        painter.setBrush(color);
-        painter.drawPolygon(poly);
-        painter.setBrush(Qt::NoBrush);
+        if (hatch.pattern() == lcad::HatchPattern::Solid) {
+            QPolygonF poly;
+            for (const lcad::Point2D& v : hatch.vertices()) poly << toScreen(v);
+            painter.setBrush(color);
+            painter.drawPolygon(poly);
+            painter.setBrush(Qt::NoBrush);
+        } else {
+            // Boundary outline plus the pattern's clipped line work.
+            QPolygonF poly;
+            for (const lcad::Point2D& v : hatch.vertices()) poly << toScreen(v);
+            painter.setBrush(Qt::NoBrush);
+            painter.drawPolygon(poly);
+            for (const auto& [a, b] : hatch.patternSegments()) {
+                painter.drawLine(toScreen(a), toScreen(b));
+            }
+        }
         break;
     }
     case lcad::EntityType::Insert: {

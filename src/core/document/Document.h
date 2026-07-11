@@ -4,6 +4,7 @@
 #include "core/document/Block.h"
 #include "core/document/Command.h"
 #include "core/document/Layer.h"
+#include "core/document/Layout.h"
 #include "core/geometry/Entity.h"
 
 #include <memory>
@@ -12,6 +13,15 @@
 #include <vector>
 
 namespace lcad {
+
+// Document-wide dimension style defaults (a DIMSTYLE-lite): new dimensions
+// snapshot these at creation. Persisted via the DXF header ($DIMTXT/$DIMASZ/
+// $DIMDEC).
+struct DimStyle {
+    double textHeight = 2.5; // DIMTXT
+    double arrowSize = 1.25; // DIMASZ
+    int decimals = 2;        // DIMDEC
+};
 
 class Document {
 public:
@@ -56,6 +66,13 @@ public:
         if (scale > 1e-9) m_lineTypeScale = scale;
     }
 
+    const DimStyle& dimStyle() const { return m_dimStyle; }
+    DimStyle& dimStyle() { return m_dimStyle; }
+
+    // Paper-space layouts. Every document has at least one.
+    const std::vector<Layout>& layouts() const { return m_layouts; }
+    std::vector<Layout>& layouts() { return m_layouts; }
+
 private:
     std::vector<Layer> m_layers;
     LayerId m_nextLayerId = 1;
@@ -68,6 +85,8 @@ private:
     std::vector<std::unique_ptr<BlockDefinition>> m_blocks;
 
     double m_lineTypeScale = 1.0;
+    DimStyle m_dimStyle;
+    std::vector<Layout> m_layouts{Layout{}};
 
     CommandStack m_commandStack;
 };

@@ -32,12 +32,19 @@ add_executable(kumcad
     commands/ArcCommand.cpp
     commands/PolylineCommand.h
     commands/PolylineCommand.cpp
+    commands/PeditCommand.h
+    commands/PeditCommand.cpp
     commands/EllipseCommand.h
     commands/EllipseCommand.cpp
     commands/SplineCommand.h
     commands/SplineCommand.cpp
     commands/TextCommand.h
     commands/TextCommand.cpp
+    commands/MTextCommand.h
+    commands/MTextCommand.cpp
+    commands/MviewCommand.h
+    commands/MviewCommand.cpp
+    commands/VpScaleCommand.h
     commands/MoveCommand.h
     commands/MoveCommand.cpp
     commands/CopyCommand.h
@@ -60,14 +67,26 @@ add_executable(kumcad
     commands/ExtendCommand.cpp
     commands/FilletCommand.h
     commands/FilletCommand.cpp
+    commands/HatchCommand.h
+    commands/HatchCommand.cpp
     commands/DimCommand.h
     commands/DimCommand.cpp
+    commands/DimRadialCommand.h
+    commands/DimRadialCommand.cpp
+    commands/DimAngularCommand.h
+    commands/DimAngularCommand.cpp
+    commands/DimStyleCommand.h
+    commands/DimStyleCommand.cpp
     commands/AreaCommand.h
     commands/AreaCommand.cpp
+    commands/ArrayCommand.h
+    commands/ArrayCommand.cpp
     commands/BlockCommand.h
     commands/BlockCommand.cpp
     commands/InsertCommand.h
     commands/InsertCommand.cpp
+    commands/LeaderCommand.h
+    commands/LeaderCommand.cpp
 )
 
 target_include_directories(kumcad PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

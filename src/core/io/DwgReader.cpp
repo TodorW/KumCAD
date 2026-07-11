@@ -8,6 +8,7 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Text.h"
@@ -145,6 +146,27 @@ struct DwgImport {
             if (isNew) free(value);
             break;
         }
+        case DWG_TYPE_MTEXT: {
+            auto* mt = obj->tio.entity->tio.MTEXT;
+            char* value = nullptr;
+            int isNew = 0;
+            if (!dwg_dynapi_entity_utf8text(mt, "MTEXT", "text", &value, &isNew, nullptr)) break;
+            if (!value || !*value) break;
+            const std::string content = decodeMTextContent(value);
+            if (isNew) free(value);
+            if (content.empty() || mt->text_height <= 1e-12) break;
+            const double rotation = std::atan2(mt->x_axis_dir.y, mt->x_axis_dir.x);
+            auto mtext = std::make_unique<MTextEntity>(id, layer, Point2D(mt->ins_pt.x, mt->ins_pt.y), content,
+                                                       mt->text_height, mt->rect_width, rotation);
+            const int col = (mt->attachment - 1) % 3;
+            const int row = (mt->attachment - 1) / 3;
+            if (col != 0 || row != 0) {
+                const Point2D shift(-mtext->blockWidth() * col / 2.0, mtext->blockHeight() * row / 2.0);
+                mtext->translate(rotateAround(shift, Point2D(), rotation));
+            }
+            made = std::move(mtext);
+            break;
+        }
         case DWG_TYPE_DIMENSION_LINEAR: {
             const auto* dim = obj->tio.entity->tio.DIMENSION_LINEAR;
             made = std::make_unique<DimensionEntity>(id, layer, Point2D(dim->xline1_pt.x, dim->xline1_pt.y),
@@ -157,6 +179,31 @@ struct DwgImport {
             made = std::make_unique<DimensionEntity>(id, layer, Point2D(dim->xline1_pt.x, dim->xline1_pt.y),
                                                      Point2D(dim->xline2_pt.x, dim->xline2_pt.y),
                                                      Point2D(dim->def_pt.x, dim->def_pt.y), true);
+            break;
+        }
+        case DWG_TYPE_DIMENSION_RADIUS: {
+            const auto* dim = obj->tio.entity->tio.DIMENSION_RADIUS;
+            made = std::make_unique<DimensionEntity>(id, layer, DimensionKind::Radius,
+                                                     Point2D(dim->def_pt.x, dim->def_pt.y),
+                                                     Point2D(dim->first_arc_pt.x, dim->first_arc_pt.y),
+                                                     Point2D(dim->text_midpt.x, dim->text_midpt.y));
+            break;
+        }
+        case DWG_TYPE_DIMENSION_DIAMETER: {
+            const auto* dim = obj->tio.entity->tio.DIMENSION_DIAMETER;
+            const Point2D far(dim->def_pt.x, dim->def_pt.y);
+            const Point2D near(dim->first_arc_pt.x, dim->first_arc_pt.y);
+            made = std::make_unique<DimensionEntity>(id, layer, DimensionKind::Diameter, (far + near) * 0.5, near,
+                                                     Point2D(dim->text_midpt.x, dim->text_midpt.y));
+            break;
+        }
+        case DWG_TYPE_DIMENSION_ANG3PT: {
+            const auto* dim = obj->tio.entity->tio.DIMENSION_ANG3PT;
+            made = std::make_unique<DimensionEntity>(id, layer, DimensionKind::Angular,
+                                                     Point2D(dim->xline1_pt.x, dim->xline1_pt.y),
+                                                     Point2D(dim->xline2_pt.x, dim->xline2_pt.y),
+                                                     Point2D(dim->def_pt.x, dim->def_pt.y),
+                                                     Point2D(dim->center_pt.x, dim->center_pt.y));
             break;
         }
         case DWG_TYPE_INSERT: {

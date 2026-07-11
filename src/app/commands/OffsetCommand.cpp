@@ -3,7 +3,12 @@
 #include "core/document/Commands.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
+#include "core/geometry/Ellipse.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/PolylineOps.h"
+#include "core/geometry/Spline.h"
+
+#include <cmath>
 
 QString OffsetCommand::start() {
     return QStringLiteral("OFFSET  %1 found\nSpecify offset distance (type it, or pick two points):")
@@ -77,6 +82,41 @@ QString OffsetCommand::commit(const lcad::Point2D& sidePoint) {
                                                      newRadius, arc.startAngle(), arc.endAngle());
             break;
         }
+        case lcad::EntityType::Polyline: {
+            const auto& pl = static_cast<const lcad::PolylineEntity&>(*source);
+            copy = lcad::offsetPolyline(pl, m_document.reserveEntityId(), m_distance, sidePoint);
+            break;
+        }
+        case lcad::EntityType::Ellipse: {
+            // An ellipse's offset isn't an ellipse; sample the curve, push
+            // each point along its normal, and fit a spline through them --
+            // the same shape AutoCAD produces.
+            const auto& ellipse = static_cast<const lcad::EllipseEntity&>(*source);
+            const double rx = ellipse.radiusX();
+            const double ry = ellipse.radiusY();
+            if (rx < 1e-9 || ry < 1e-9) break;
+            const lcad::Point2D localSide =
+                rotateAround(sidePoint - ellipse.center(), lcad::Point2D(), -ellipse.rotation());
+            const bool outward =
+                (localSide.x * localSide.x) / (rx * rx) + (localSide.y * localSide.y) / (ry * ry) > 1.0;
+            if (!outward && m_distance >= std::min(rx, ry) - 1e-9) break; // would self-intersect
+            const double d = outward ? m_distance : -m_distance;
+            std::vector<lcad::Point2D> fit;
+            const int samples = 40;
+            for (int i = 0; i <= samples; ++i) {
+                const double t = 2.0 * M_PI * i / samples;
+                const lcad::Point2D local(rx * std::cos(t), ry * std::sin(t));
+                const lcad::Point2D tangent(-rx * std::sin(t), ry * std::cos(t));
+                const double tlen = tangent.length();
+                if (tlen < 1e-12) continue;
+                // Outward normal of the CCW-parameterized curve is its right normal.
+                const lcad::Point2D normal(tangent.y / tlen, -tangent.x / tlen);
+                fit.push_back(ellipse.center() +
+                              rotateAround(local + normal * d, lcad::Point2D(), ellipse.rotation()));
+            }
+            copy = lcad::SplineEntity::fromFitPoints(m_document.reserveEntityId(), source->layer(), std::move(fit));
+            break;
+        }
         default:
             break;
         }
@@ -91,7 +131,7 @@ QString OffsetCommand::commit(const lcad::Point2D& sidePoint) {
 
     if (!batch->empty()) m_document.commandStack().execute(std::move(batch));
     if (skipped > 0) {
-        return QStringLiteral("*%1 offset, %2 skipped (only lines, circles, and arcs can be offset)*")
+        return QStringLiteral("*%1 offset, %2 skipped (unsupported entity type or degenerate distance)*")
             .arg(made)
             .arg(skipped);
     }

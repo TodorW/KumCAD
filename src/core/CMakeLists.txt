@@ -18,15 +18,24 @@ add_library(lcad_core STATIC
     geometry/Spline.cpp
     geometry/Text.h
     geometry/Text.cpp
+    geometry/MText.h
+    geometry/MText.cpp
     geometry/Dimension.h
     geometry/Dimension.cpp
+    geometry/HatchPattern.h
+    geometry/HatchPattern.cpp
     geometry/Hatch.h
     geometry/Hatch.cpp
+    geometry/Leader.h
+    geometry/Leader.cpp
     geometry/Insert.h
     geometry/Insert.cpp
+    geometry/PolylineOps.h
+    geometry/PolylineOps.cpp
     geometry/Intersect.h
     geometry/Intersect.cpp
     document/Layer.h
+    document/Layout.h
     document/LineType.h
     document/LineType.cpp
     document/Block.h

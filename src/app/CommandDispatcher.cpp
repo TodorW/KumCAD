@@ -4,20 +4,29 @@
 #include "DrawingView.h"
 #include "commands/ArcCommand.h"
 #include "commands/AreaCommand.h"
+#include "commands/ArrayCommand.h"
 #include "commands/BlockCommand.h"
 #include "commands/CircleCommand.h"
 #include "commands/CopyCommand.h"
+#include "commands/DimAngularCommand.h"
 #include "commands/DimCommand.h"
+#include "commands/DimRadialCommand.h"
+#include "commands/DimStyleCommand.h"
 #include "commands/DistCommand.h"
 #include "commands/EllipseCommand.h"
 #include "commands/ExtendCommand.h"
 #include "commands/FilletCommand.h"
+#include "commands/HatchCommand.h"
 #include "commands/InsertCommand.h"
+#include "commands/LeaderCommand.h"
 #include "commands/LineCommand.h"
 #include "commands/LtScaleCommand.h"
+#include "commands/MTextCommand.h"
 #include "commands/MirrorCommand.h"
+#include "commands/MviewCommand.h"
 #include "commands/MoveCommand.h"
 #include "commands/OffsetCommand.h"
+#include "commands/PeditCommand.h"
 #include "commands/PolylineCommand.h"
 #include "commands/RectangCommand.h"
 #include "commands/RotateCommand.h"
@@ -25,6 +34,7 @@
 #include "commands/SplineCommand.h"
 #include "commands/TextCommand.h"
 #include "commands/TrimCommand.h"
+#include "commands/VpScaleCommand.h"
 #include "core/document/Commands.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Hatch.h"
@@ -131,6 +141,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<RectangCommand>(m_document), QStringLiteral("RECTANG"));
     } else if (cmd == QLatin1String("TEXT") || cmd == QLatin1String("DT")) {
         startCommand(std::make_unique<TextCommand>(m_document), QStringLiteral("TEXT"));
+    } else if (cmd == QLatin1String("MTEXT") || cmd == QLatin1String("MT") || cmd == QLatin1String("T")) {
+        startCommand(std::make_unique<MTextCommand>(m_document), QStringLiteral("MTEXT"));
     } else if (cmd == QLatin1String("MOVE") || cmd == QLatin1String("M")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) startCommand(std::make_unique<MoveCommand>(m_document, ids), QStringLiteral("MOVE"));
@@ -149,6 +161,9 @@ void CommandDispatcher::handleCommandText(const QString& text) {
     } else if (cmd == QLatin1String("OFFSET") || cmd == QLatin1String("O")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) startCommand(std::make_unique<OffsetCommand>(m_document, ids), QStringLiteral("OFFSET"));
+    } else if (cmd == QLatin1String("PEDIT") || cmd == QLatin1String("PE")) {
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        if (!ids.empty()) startCommand(std::make_unique<PeditCommand>(m_document, ids), QStringLiteral("PEDIT"));
     } else if (cmd == QLatin1String("TRIM") || cmd == QLatin1String("TR")) {
         // Empty selection = every entity is a cutting edge (quick-trim style).
         const std::vector<lcad::EntityId> ids = m_view ? m_view->selectedIds() : std::vector<lcad::EntityId>{};
@@ -173,19 +188,50 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<DimCommand>(m_document, false), QStringLiteral("DIMLINEAR"));
     } else if (cmd == QLatin1String("DIMALIGNED") || cmd == QLatin1String("DAL")) {
         startCommand(std::make_unique<DimCommand>(m_document, true), QStringLiteral("DIMALIGNED"));
+    } else if (cmd == QLatin1String("DIMRADIUS") || cmd == QLatin1String("DRA")) {
+        startCommand(std::make_unique<DimRadialCommand>(m_document, false, pickTolerance()),
+                     QStringLiteral("DIMRADIUS"));
+    } else if (cmd == QLatin1String("DIMDIAMETER") || cmd == QLatin1String("DDI")) {
+        startCommand(std::make_unique<DimRadialCommand>(m_document, true, pickTolerance()),
+                     QStringLiteral("DIMDIAMETER"));
+    } else if (cmd == QLatin1String("DIMANGULAR") || cmd == QLatin1String("DAN")) {
+        startCommand(std::make_unique<DimAngularCommand>(m_document), QStringLiteral("DIMANGULAR"));
+    } else if (cmd == QLatin1String("DIMSTYLE") || cmd == QLatin1String("D")) {
+        startCommand(std::make_unique<DimStyleCommand>(m_document), QStringLiteral("DIMSTYLE"));
+    } else if (cmd == QLatin1String("LEADER") || cmd == QLatin1String("LEAD") || cmd == QLatin1String("LE")) {
+        startCommand(std::make_unique<LeaderCommand>(m_document), QStringLiteral("LEADER"));
     } else if (cmd == QLatin1String("HATCH") || cmd == QLatin1String("H")) {
-        hatchSelection();
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        if (!ids.empty()) startCommand(std::make_unique<HatchCommand>(m_document, ids), QStringLiteral("HATCH"));
     } else if (cmd == QLatin1String("BLOCK") || cmd == QLatin1String("B")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) startCommand(std::make_unique<BlockCommand>(m_document, ids), QStringLiteral("BLOCK"));
     } else if (cmd == QLatin1String("INSERT") || cmd == QLatin1String("I")) {
         startCommand(std::make_unique<InsertCommand>(m_document), QStringLiteral("INSERT"));
+    } else if (cmd == QLatin1String("ARRAY") || cmd == QLatin1String("AR")) {
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        if (!ids.empty()) startCommand(std::make_unique<ArrayCommand>(m_document, ids), QStringLiteral("ARRAY"));
     } else if (cmd == QLatin1String("EXPLODE") || cmd == QLatin1String("X")) {
         explodeSelection();
     } else if (cmd == QLatin1String("AREA") || cmd == QLatin1String("AA")) {
         startCommand(std::make_unique<AreaCommand>(), QStringLiteral("AREA"));
     } else if (cmd == QLatin1String("DIST") || cmd == QLatin1String("DI")) {
         startCommand(std::make_unique<DistCommand>(), QStringLiteral("DIST"));
+    } else if (cmd == QLatin1String("MVIEW") || cmd == QLatin1String("MV")) {
+        if (m_view && m_view->inLayoutMode()) {
+            startCommand(std::make_unique<MviewCommand>(m_document, m_view->activeLayoutIndex()),
+                         QStringLiteral("MVIEW"));
+        } else {
+            m_commandLine.appendLine(QStringLiteral("*MVIEW only works in a layout tab*"));
+        }
+    } else if (cmd == QLatin1String("VPSCALE") || cmd == QLatin1String("VPS")) {
+        if (m_view && m_view->inLayoutMode() && m_view->selectedViewportIndex() >= 0) {
+            startCommand(std::make_unique<VpScaleCommand>(m_document, m_view->activeLayoutIndex(),
+                                                          m_view->selectedViewportIndex()),
+                         QStringLiteral("VPSCALE"));
+        } else {
+            m_commandLine.appendLine(QStringLiteral("*Select a viewport in a layout tab first*"));
+        }
     } else if (cmd == QLatin1String("LTSCALE") || cmd == QLatin1String("LTS")) {
         startCommand(std::make_unique<LtScaleCommand>(m_document), QStringLiteral("LTSCALE"));
     } else if (cmd == QLatin1String("ZOOM") || cmd == QLatin1String("Z")) {
@@ -230,7 +276,14 @@ void CommandDispatcher::handleMouseMoved(const lcad::Point2D& pt) {
 
 void CommandDispatcher::handleFinishRequested() {
     if (!m_activeCommand) return;
-    m_activeCommand->requestFinish();
+    const bool accepted = m_activeCommand->requestFinish();
+    if (accepted && !m_activeCommand->isFinished()) {
+        // Multi-phase command moving to its next phase (e.g. LEADER's Enter
+        // ending the points and starting the annotation) rather than ending.
+        if (const auto message = m_activeCommand->resultMessage()) m_commandLine.appendLine(*message);
+        emit previewChanged();
+        return;
+    }
     if (const auto message = m_activeCommand->resultMessage()) m_commandLine.appendLine(*message);
     finishCommand();
 }
@@ -255,39 +308,6 @@ void CommandDispatcher::redo() {
 
 double CommandDispatcher::pickTolerance() const {
     return m_view ? m_view->pickToleranceWorld() : 0.5;
-}
-
-void CommandDispatcher::hatchSelection() {
-    const std::vector<lcad::EntityId> ids = selectionForModify();
-    if (ids.empty()) return;
-
-    auto batch = std::make_unique<lcad::BatchCommand>("Hatch");
-    int made = 0;
-    int skipped = 0;
-    for (lcad::EntityId id : ids) {
-        const lcad::Entity* e = m_document.findEntity(id);
-        if (e && e->type() == lcad::EntityType::Polyline) {
-            const auto& pl = static_cast<const lcad::PolylineEntity&>(*e);
-            if (pl.closed() && pl.vertices().size() >= 3) {
-                batch->add(std::make_unique<lcad::AddEntityCommand>(
-                    m_document, std::make_unique<lcad::HatchEntity>(m_document.reserveEntityId(), e->layer(),
-                                                                    pl.flattenedVertices())));
-                ++made;
-                continue;
-            }
-        }
-        ++skipped;
-    }
-    if (!batch->empty()) {
-        m_document.commandStack().execute(std::move(batch));
-        emit documentChanged();
-    }
-    if (skipped > 0) {
-        m_commandLine.appendLine(
-            QStringLiteral("*%1 hatched, %2 skipped (only closed polylines can be hatched)*").arg(made).arg(skipped));
-    } else {
-        m_commandLine.appendLine(QStringLiteral("*%1 hatched*").arg(made));
-    }
 }
 
 void CommandDispatcher::explodeSelection() {

@@ -21,7 +21,9 @@ enum class EntityType {
     Ellipse,
     Spline,
     Text,
+    MText,
     Dimension,
+    Leader,
     Hatch,
     Insert,
 };

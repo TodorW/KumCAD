@@ -113,6 +113,38 @@ TEST_CASE("lengthenedClone extends an arc's sweep at the picked end", "[modifyop
     REQUIRE(lcad::lengthenedClone(arc, lcad::Point2D(0, 10), 10.0 * 2 * M_PI) == nullptr);
 }
 
+TEST_CASE("lengthenedClone extends only a polyline's terminal segment", "[modifyops]") {
+    // Straight chain: (0,0)-(10,0)-(10,10).
+    lcad::PolylineEntity straight(1, 0, {{0, 0}, {10, 0}, {10, 10}}, false);
+
+    const auto longer = lcad::lengthenedClone(straight, lcad::Point2D(10, 9), 5.0);
+    REQUIRE(longer);
+    const auto& result = static_cast<const lcad::PolylineEntity&>(*longer);
+    REQUIRE(result.vertices()[0].x == Approx(0.0).margin(1e-9)); // untouched
+    REQUIRE(result.vertices()[1].x == Approx(10.0));             // untouched
+    REQUIRE(result.vertices()[1].y == Approx(0.0).margin(1e-9));
+    REQUIRE(result.vertices()[2].y == Approx(15.0)); // extended
+
+    const auto shorterAtStart = lcad::lengthenedClone(straight, lcad::Point2D(1, 1), -3.0);
+    REQUIRE(shorterAtStart);
+    const auto& result2 = static_cast<const lcad::PolylineEntity&>(*shorterAtStart);
+    REQUIRE(result2.vertices()[0].x == Approx(3.0));
+    REQUIRE(result2.vertices()[2].y == Approx(10.0)); // far end untouched
+
+    // A bulged terminal segment: the same CCW semicircle from earlier tests,
+    // center (10,5) radius 5, spanning -90..+90 degrees.
+    lcad::PolylineEntity bulged(2, 0, {{0, 0}, {10, 0}, {10, 10}}, {0.0, 1.0}, false);
+    const double quarterLen = 5.0 * M_PI / 2.0;
+    const auto grown = lcad::lengthenedClone(bulged, lcad::Point2D(10, 9), quarterLen);
+    REQUIRE(grown);
+    const auto& result3 = static_cast<const lcad::PolylineEntity&>(*grown);
+    REQUIRE(result3.vertices()[1].x == Approx(10.0)); // near end untouched
+    REQUIRE(result3.vertices()[1].y == Approx(0.0).margin(1e-9));
+    REQUIRE(result3.vertices()[2].x == Approx(5.0).margin(1e-6)); // swept a further quarter turn
+    REQUIRE(result3.vertices()[2].y == Approx(5.0).margin(1e-6));
+    REQUIRE(result3.bulgeAt(1) == Approx(std::tan(3.0 * M_PI / 8.0)));
+}
+
 TEST_CASE("breakEntity removes the middle of a line", "[modifyops]") {
     lcad::LineEntity line(1, 0, lcad::Point2D(0, 0), lcad::Point2D(10, 0));
     lcad::EntityId next = 100;
@@ -170,6 +202,50 @@ TEST_CASE("breakEntity splits a straight polyline into two chains", "[modifyops]
     REQUIRE(head.vertices().back().x == Approx(4.0));
     REQUIRE(tail.vertices().front().y == Approx(3.0));
     REQUIRE(tail.vertices().back().y == Approx(10.0));
+}
+
+TEST_CASE("breakEntity splits a polyline arc segment, recomputing sub-bulges", "[modifyops]") {
+    // Line (0,0)-(10,0) then a CCW semicircle from (10,0) to (10,10):
+    // center (10,5), radius 5, spanning -90..+90 degrees.
+    lcad::PolylineEntity pl(1, 0, {{0, 0}, {10, 0}, {10, 10}}, {0.0, 1.0}, false);
+    lcad::EntityId next = 100;
+    const auto makeId = [&next]() { return next++; };
+
+    // Break at the arc's -45 and +45 degree points (quarter and
+    // three-quarter along the sweep).
+    const lcad::Point2D a(10.0 + 5.0 * std::cos(-M_PI / 4), 5.0 + 5.0 * std::sin(-M_PI / 4));
+    const lcad::Point2D b(10.0 + 5.0 * std::cos(M_PI / 4), 5.0 + 5.0 * std::sin(M_PI / 4));
+
+    const auto broken = lcad::breakEntity(pl, a, b, makeId);
+    REQUIRE(broken.ok);
+    REQUIRE(broken.pieces.size() == 2);
+
+    const auto& head = static_cast<const lcad::PolylineEntity&>(*broken.pieces[0]);
+    REQUIRE(head.vertices().size() == 3);
+    REQUIRE(head.vertices()[0].x == Approx(0.0).margin(1e-9));
+    REQUIRE(head.vertices()[1].x == Approx(10.0));
+    REQUIRE(head.vertices()[1].y == Approx(0.0).margin(1e-9));
+    REQUIRE(head.vertices()[2].x == Approx(a.x));
+    REQUIRE(head.vertices()[2].y == Approx(a.y));
+    REQUIRE(head.bulgeAt(0) == Approx(0.0).margin(1e-9));       // still the straight segment
+    REQUIRE(head.bulgeAt(1) == Approx(std::tan(M_PI / 16)));    // quarter of the original sweep
+
+    const auto& tail = static_cast<const lcad::PolylineEntity&>(*broken.pieces[1]);
+    REQUIRE(tail.vertices().size() == 2);
+    REQUIRE(tail.vertices()[0].x == Approx(b.x));
+    REQUIRE(tail.vertices()[0].y == Approx(b.y));
+    REQUIRE(tail.vertices()[1].x == Approx(10.0));
+    REQUIRE(tail.vertices()[1].y == Approx(10.0));
+    REQUIRE(tail.bulgeAt(0) == Approx(std::tan(M_PI / 16)));
+
+    // The two sub-arcs plus the untouched middle quarter should still trace
+    // through the pole of the original semicircle -- confirms the split
+    // points really landed on the arc, not just near it.
+    const auto headArc = lcad::bulgeToArc(head.vertices()[1], head.vertices()[2], head.bulgeAt(1));
+    REQUIRE(headArc.has_value());
+    REQUIRE(headArc->center.x == Approx(10.0));
+    REQUIRE(headArc->center.y == Approx(5.0));
+    REQUIRE(headArc->radius == Approx(5.0));
 }
 
 TEST_CASE("nearestPointOnEntity projects onto lines, circles, and arcs", "[snapgeometry]") {

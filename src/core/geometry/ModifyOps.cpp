@@ -115,7 +115,9 @@ std::unique_ptr<Entity> stretchedClone(const Entity& e, const BoundingBox& windo
     case EntityType::Spline:
     case EntityType::Hatch:
     case EntityType::Leader:
+    case EntityType::MLeader:
     case EntityType::Dimension:
+    case EntityType::Table:
         return stretchByGrips(e, window, delta);
     }
     return nullptr;
@@ -177,6 +179,49 @@ std::unique_ptr<Entity> lengthenedClone(const Entity& e, const Point2D& pickPt, 
                              arc.center().y + arc.radius() * std::sin(newAngle));
         std::unique_ptr<Entity> clone = e.clone();
         clone->moveGripPoint(atEnd ? 1 : 0, newPos);
+        return clone;
+    }
+    if (e.type() == EntityType::Polyline) {
+        // Only the polyline's terminal segment (nearer pickPt) changes,
+        // matching AutoCAD LENGTHEN on a polyline; the rest of the chain is
+        // untouched. A bulged terminal segment keeps its center and radius,
+        // like the Arc case, and gets its bulge recomputed for the new sweep.
+        const auto& pl = static_cast<const PolylineEntity&>(e);
+        if (pl.closed() || pl.vertices().size() < 2) return nullptr;
+        const auto& verts = pl.vertices();
+        const std::size_t n = verts.size();
+        const bool atEnd = pickPt.distanceTo(verts.back()) <= pickPt.distanceTo(verts.front());
+        const std::size_t segIdx = atEnd ? n - 2 : 0;
+        const Point2D& segStart = verts[segIdx];
+        const Point2D& segEnd = verts[segIdx + 1];
+        const double bulge = pl.bulgeAt(segIdx);
+
+        std::unique_ptr<Entity> clone = e.clone();
+        auto& newPl = static_cast<PolylineEntity&>(*clone);
+
+        if (const auto arc = bulgeToArc(segStart, segEnd, bulge)) {
+            if (arc->radius < kEps) return nullptr;
+            const double sign = arc->sweep >= 0 ? 1.0 : -1.0;
+            const double newSweep = arc->sweep + sign * (deltaLen / arc->radius);
+            if (std::abs(newSweep) < 1e-6 || std::abs(newSweep) > kTwoPi - 1e-6) return nullptr;
+            if (atEnd) {
+                const double newEndAngle = arc->startAngle + newSweep;
+                newPl.moveGripPoint(segIdx + 1, arc->center + Point2D(std::cos(newEndAngle), std::sin(newEndAngle)) *
+                                                                  arc->radius);
+            } else {
+                const double newStartAngle = (arc->startAngle + arc->sweep) - newSweep;
+                newPl.moveGripPoint(segIdx, arc->center + Point2D(std::cos(newStartAngle), std::sin(newStartAngle)) *
+                                                               arc->radius);
+            }
+            newPl.setBulge(segIdx, std::tan(newSweep / 4.0));
+        } else {
+            const Point2D d = segEnd - segStart;
+            const double len = d.length();
+            if (len < kEps || len + deltaLen < kEps) return nullptr;
+            const Point2D dir = d * (1.0 / len);
+            if (atEnd) newPl.moveGripPoint(segIdx + 1, segEnd + dir * deltaLen);
+            else newPl.moveGripPoint(segIdx, segStart - dir * deltaLen);
+        }
         return clone;
     }
     return nullptr;
@@ -258,9 +303,12 @@ BreakResult breakEntity(const Entity& e, const Point2D& a, const Point2D& b,
     }
     case EntityType::Polyline: {
         const auto& pl = static_cast<const PolylineEntity&>(e);
-        if (pl.closed() || pl.hasArcs() || pl.vertices().size() < 2) return result;
+        if (pl.closed() || pl.vertices().size() < 2) return result;
         const auto& verts = pl.vertices();
-        // Locate a point along the vertex chain as (segment index, param).
+        // Locate a point along the vertex chain as (segment index, param):
+        // t is a plain 0..1 fraction on straight segments, and the
+        // start-to-end sweep fraction on bulged ones, so the two compare the
+        // same way regardless of segment kind.
         struct ChainPos {
             std::size_t seg = 0;
             double t = 0.0;
@@ -270,14 +318,33 @@ BreakResult breakEntity(const Entity& e, const Point2D& a, const Point2D& b,
             ChainPos best;
             double bestDist = std::numeric_limits<double>::max();
             for (std::size_t i = 0; i + 1 < verts.size(); ++i) {
-                const Point2D d = verts[i + 1] - verts[i];
-                const double lenSq = d.dot(d);
-                const double t = lenSq < kEps ? 0.0 : std::clamp((p - verts[i]).dot(d) / lenSq, 0.0, 1.0);
-                const Point2D onSeg = verts[i] + d * t;
-                const double dist = onSeg.distanceTo(p);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = {i, t, onSeg};
+                const double bulge = pl.bulgeAt(i);
+                if (const auto arc = bulgeToArc(verts[i], verts[i + 1], bulge)) {
+                    const double ang = std::atan2(p.y - arc->center.y, p.x - arc->center.x);
+                    double rel = std::fmod(ang - arc->startAngle, kTwoPi);
+                    if (arc->sweep >= 0) {
+                        if (rel < 0) rel += kTwoPi;
+                    } else if (rel > 0) {
+                        rel -= kTwoPi;
+                    }
+                    const double t = std::clamp(rel / arc->sweep, 0.0, 1.0);
+                    const double theta = arc->startAngle + arc->sweep * t;
+                    const Point2D onSeg = arc->center + Point2D(std::cos(theta), std::sin(theta)) * arc->radius;
+                    const double dist = onSeg.distanceTo(p);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = {i, t, onSeg};
+                    }
+                } else {
+                    const Point2D d = verts[i + 1] - verts[i];
+                    const double lenSq = d.dot(d);
+                    const double t = lenSq < kEps ? 0.0 : std::clamp((p - verts[i]).dot(d) / lenSq, 0.0, 1.0);
+                    const Point2D onSeg = verts[i] + d * t;
+                    const double dist = onSeg.distanceTo(p);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = {i, t, onSeg};
+                    }
                 }
             }
             return best;
@@ -286,24 +353,46 @@ BreakResult breakEntity(const Entity& e, const Point2D& a, const Point2D& b,
         ChainPos pb = locate(b);
         if (pb.seg < pa.seg || (pb.seg == pa.seg && pb.t < pa.t)) std::swap(pa, pb);
 
-        std::vector<Point2D> head(verts.begin(), verts.begin() + pa.seg + 1);
-        if (head.empty() || head.back().distanceTo(pa.point) > kEps) head.push_back(pa.point);
-        std::vector<Point2D> tail;
-        if (pb.point.distanceTo(verts[pb.seg + 1]) > kEps) tail.push_back(pb.point);
-        tail.insert(tail.end(), verts.begin() + pb.seg + 1, verts.end());
+        constexpr double kTolT = 1e-6;
+        // The bulge remaining on a sub-arc that covers [from, to] of the
+        // original segment's sweep (bulge = tan(includedAngle / 4)).
+        const auto subBulge = [&](std::size_t seg, double from, double to) {
+            const auto arc = bulgeToArc(verts[seg], verts[seg + 1], pl.bulgeAt(seg));
+            if (!arc) return 0.0;
+            return std::tan(arc->sweep * (to - from) / 4.0);
+        };
+
+        std::vector<Point2D> headVerts(verts.begin(), verts.begin() + pa.seg + 1);
+        std::vector<double> headBulges(pl.bulges().begin(), pl.bulges().begin() + pa.seg);
+        if (pa.t > kTolT) {
+            headBulges.push_back(subBulge(pa.seg, 0.0, pa.t));
+            headVerts.push_back(pa.point);
+        }
+
+        std::vector<Point2D> tailVerts;
+        std::vector<double> tailBulges;
+        if (pb.t < 1.0 - kTolT) {
+            tailVerts.push_back(pb.point);
+            tailBulges.push_back(subBulge(pb.seg, pb.t, 1.0));
+        }
+        for (std::size_t i = pb.seg + 1; i < verts.size(); ++i) {
+            tailVerts.push_back(verts[i]);
+            if (i + 1 < verts.size()) tailBulges.push_back(pl.bulgeAt(i));
+        }
 
         result.ok = true;
-        const auto emit = [&](std::vector<Point2D> chain) {
-            if (chain.size() < 2) return;
+        const auto emit = [&](std::vector<Point2D> chainVerts, std::vector<double> chainBulges) {
+            if (chainVerts.size() < 2) return;
             double len = 0.0;
-            for (std::size_t i = 0; i + 1 < chain.size(); ++i) len += chain[i].distanceTo(chain[i + 1]);
+            for (std::size_t i = 0; i + 1 < chainVerts.size(); ++i) len += chainVerts[i].distanceTo(chainVerts[i + 1]);
             if (len < 1e-6) return;
-            auto piece = std::make_unique<PolylineEntity>(makeId(), e.layer(), std::move(chain), false);
+            auto piece = std::make_unique<PolylineEntity>(makeId(), e.layer(), std::move(chainVerts),
+                                                           std::move(chainBulges), false);
             copyStyle(e, *piece);
             result.pieces.push_back(std::move(piece));
         };
-        emit(std::move(head));
-        emit(std::move(tail));
+        emit(std::move(headVerts), std::move(headBulges));
+        emit(std::move(tailVerts), std::move(tailBulges));
         return result;
     }
     default:

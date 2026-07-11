@@ -3,10 +3,11 @@
 #include "commands/DrawCommand.h"
 #include "core/document/Document.h"
 
-// AutoCAD-style LENGTHEN for lines and arcs. Picking an object with no mode
-// set reports its length; DElta/Percent/Total (typed as DE/P/T) set how the
-// following numeric value changes each picked object, applied to the end
-// nearer the pick. Each pick is one undo step.
+// AutoCAD-style LENGTHEN for lines, arcs, and open polylines (only the
+// terminal segment nearer the pick changes on a polyline). Picking an object
+// with no mode set reports its length; DElta/Percent/Total (typed as DE/P/T)
+// set how the following numeric value changes each picked object, applied to
+// the end nearer the pick. Each pick is one undo step.
 class LengthenCommand : public DrawCommand {
 public:
     LengthenCommand(lcad::Document& document, double pickTolerance)

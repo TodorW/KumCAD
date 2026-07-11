@@ -12,7 +12,7 @@ lcad::Entity* pickLengthenTarget(lcad::Document& document, const lcad::Point2D& 
         const lcad::Layer* layer = document.findLayer(e->layer());
         if (layer && (!layer->visible || layer->locked)) continue;
         const lcad::EntityType t = e->type();
-        if (t != lcad::EntityType::Line && t != lcad::EntityType::Arc) continue;
+        if (t != lcad::EntityType::Line && t != lcad::EntityType::Arc && t != lcad::EntityType::Polyline) continue;
         const double d = e->distanceTo(pt);
         if (d <= bestDist) {
             bestDist = d;
@@ -75,7 +75,7 @@ std::optional<QString> LengthenCommand::onScalar(double value) {
 
 std::optional<QString> LengthenCommand::onPoint(const lcad::Point2D& pt) {
     lcad::Entity* target = pickLengthenTarget(m_document, pt, m_pickTolerance);
-    if (!target) return QStringLiteral("*No line or arc there*\n") + prompt();
+    if (!target) return QStringLiteral("*No line, arc, or polyline there*\n") + prompt();
 
     const auto length = lcad::curveLength(*target);
     if (!length) return QStringLiteral("*Cannot measure that entity*\n") + prompt();

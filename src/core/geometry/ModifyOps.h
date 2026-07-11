@@ -25,19 +25,22 @@ std::unique_ptr<Entity> stretchedClone(const Entity& e, const BoundingBox& windo
 std::optional<double> curveLength(const Entity& e);
 
 // LENGTHEN: a clone with the end nearer pickPt extended by deltaLen along the
-// entity's own direction (negative shortens). Lines and arcs only. Returns
-// nullptr when unsupported or the result would be degenerate (zero-length
-// line, arc sweep outside (0, 2pi)).
+// entity's own direction (negative shortens). Lines and arcs directly; for an
+// open polyline, only its terminal segment nearer pickPt changes (straight or
+// bulged, keeping a bulged segment's center/radius like the Arc case).
+// Returns nullptr when unsupported or the result would be degenerate
+// (zero-length line, arc/bulge sweep outside (0, 2pi)).
 std::unique_ptr<Entity> lengthenedClone(const Entity& e, const Point2D& pickPt, double deltaLen);
 
 // BREAK: the pieces remaining after removing the stretch between a and b
 // (both projected onto the entity's curve). Lines and arcs yield up to two
 // pieces; a circle yields one arc running CCW from b around to a (AutoCAD
-// removes the CCW stretch from the first to the second point); straight
-// polylines split into two chains. a == b splits at a point without removing
-// material. makeId supplies ids for the new pieces. Empty result plus
-// ok=false means the entity type (or an arc-segment polyline) isn't
-// breakable.
+// removes the CCW stretch from the first to the second point); open
+// polylines split into two chains, preserving bulges (arc segments) on
+// either side and recomputing the bulge of whichever sub-arc got split. a ==
+// b splits at a point without removing material. makeId supplies ids for the
+// new pieces. Empty result plus ok=false means the entity type (or a closed
+// polyline) isn't breakable.
 struct BreakResult {
     bool ok = false;
     std::vector<std::unique_ptr<Entity>> pieces;

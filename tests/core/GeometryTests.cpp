@@ -502,6 +502,54 @@ TEST_CASE("InsertEntity transforms its block's children", "[geometry][block]") {
     REQUIRE(insert.boundingBox().max.y == Approx(6.0));
 }
 
+TEST_CASE("InsertEntity dynamic linear parameter stretches per-instance", "[geometry][block][dynamic]") {
+    lcad::Document doc;
+    std::vector<std::unique_ptr<lcad::Entity>> children;
+    children.push_back(
+        std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0), lcad::Point2D(10, 0)));
+    doc.addBlock("bar", std::move(children));
+    lcad::BlockDefinition* block = doc.findBlock("bar");
+
+    lcad::DynamicLinearParameter dp;
+    dp.basePoint = lcad::Point2D(0, 0);
+    dp.endPoint = lcad::Point2D(10, 0);
+    dp.frameMin = lcad::Point2D(8, -1);
+    dp.frameMax = lcad::Point2D(12, 1);
+    block->dynamicParam = dp;
+    REQUIRE(block->isDynamic());
+
+    // Default stretch (0): unchanged from the plain-block case.
+    lcad::InsertEntity plain(doc.reserveEntityId(), 0, block, lcad::Point2D(0, 0));
+    auto plainInstances = plain.instantiate();
+    REQUIRE(plainInstances.size() == 1);
+    const auto* plainLine = static_cast<const lcad::LineEntity*>(plainInstances[0].get());
+    REQUIRE(plainLine->end().x == Approx(10.0));
+
+    // Two independent instances of the same dynamic block, stretched differently.
+    lcad::InsertEntity stretched(doc.reserveEntityId(), 0, block, lcad::Point2D(0, 0));
+    stretched.setDynamicStretch(5.0);
+    const auto stretchedInstances = stretched.instantiate();
+    const auto* longLine = static_cast<const lcad::LineEntity*>(stretchedInstances[0].get());
+    REQUIRE(longLine->start().x == Approx(0.0).margin(1e-9)); // base point untouched: outside the frame
+    REQUIRE(longLine->end().x == Approx(15.0));
+
+    lcad::InsertEntity shrunk(doc.reserveEntityId(), 0, block, lcad::Point2D(0, 0));
+    shrunk.setDynamicStretch(-3.0);
+    const auto shrunkInstances = shrunk.instantiate();
+    const auto* shortLine = static_cast<const lcad::LineEntity*>(shrunkInstances[0].get());
+    REQUIRE(shortLine->end().x == Approx(7.0));
+
+    // The original (unstretched) instance is unaffected by the others.
+    REQUIRE(static_cast<const lcad::LineEntity*>(plain.instantiate()[0].get())->end().x == Approx(10.0));
+
+    // Grip round trip: the dynamic grip sits at the parameter's endpoint by
+    // default, and dragging it re-derives the stretch distance.
+    REQUIRE(plain.gripPoints().size() == 2);
+    REQUIRE(plain.gripPoints()[1].x == Approx(10.0));
+    plain.moveGripPoint(1, lcad::Point2D(14, 0));
+    REQUIRE(plain.dynamicStretch() == Approx(4.0));
+}
+
 TEST_CASE("bulgeToArc matches the DXF bulge convention", "[geometry][bulge]") {
     // Values cross-checked against ezdxf's bulge_to_arc.
     const lcad::Point2D a(0, 0);

@@ -582,6 +582,18 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
             writeGroup(out, 30, 0.0);
             writeGroup(out, 3, block->name);
             if (block->isXref()) writeGroup(out, 1, block->xrefPath);
+            // Simplified dynamic-block linear parameter: eight group-40
+            // reals (base.x/y, end.x/y, frameMin.x/y, frameMax.x/y) rather
+            // than a real BLOCK's normal fields, safely ignorable by any
+            // reader that doesn't expect them there (round-trips within
+            // KumCAD; see DynamicLinearParameter).
+            if (block->dynamicParam) {
+                const auto& dp = *block->dynamicParam;
+                for (double v : {dp.basePoint.x, dp.basePoint.y, dp.endPoint.x, dp.endPoint.y, dp.frameMin.x,
+                                 dp.frameMin.y, dp.frameMax.x, dp.frameMax.y}) {
+                    writeGroup(out, 40, v);
+                }
+            }
             for (const auto& child : block->entities) writeEntity(out, document, *child);
             writeGroup(out, 0, "ENDBLK");
             writeGroup(out, 8, "0");

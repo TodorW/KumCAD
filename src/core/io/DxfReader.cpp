@@ -177,6 +177,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::string curBlockName;
     std::string curBlockXrefPath;
     Point2D curBlockBase;
+    std::vector<double> curBlockDynamicValues; // simplified dynamic-block linear parameter, see DxfWriter
     std::vector<std::unique_ptr<Entity>> curBlockEntities;
     int curPaperIndex = -1; // >= 0 while inside a *Paper_Space block
 
@@ -203,6 +204,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             curBlockName.clear();
             curBlockXrefPath.clear();
             curBlockBase = Point2D();
+            curBlockDynamicValues.clear();
             return;
         }
         // Normalize child geometry to be base-point-relative.
@@ -216,11 +218,20 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             // (if any) are the cached snapshot; the app refreshes it from
             // disk after open when the file is reachable.
             if (!curBlockXrefPath.empty()) fresh.findBlock(curBlockName)->xrefPath = curBlockXrefPath;
+            if (curBlockDynamicValues.size() == 8) {
+                DynamicLinearParameter dp;
+                dp.basePoint = Point2D(curBlockDynamicValues[0], curBlockDynamicValues[1]);
+                dp.endPoint = Point2D(curBlockDynamicValues[2], curBlockDynamicValues[3]);
+                dp.frameMin = Point2D(curBlockDynamicValues[4], curBlockDynamicValues[5]);
+                dp.frameMax = Point2D(curBlockDynamicValues[6], curBlockDynamicValues[7]);
+                fresh.findBlock(curBlockName)->dynamicParam = dp;
+            }
         }
         curBlockEntities.clear();
         curBlockName.clear();
         curBlockXrefPath.clear();
         curBlockBase = Point2D();
+        curBlockDynamicValues.clear();
     };
 
     std::string curEntityType;
@@ -741,6 +752,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             if (g.code == 10) curBlockBase.x = toDouble(g.value);
             else if (g.code == 20) curBlockBase.y = toDouble(g.value);
             else if (g.code == 1) curBlockXrefPath = g.value; // xref file path
+            else if (g.code == 40) curBlockDynamicValues.push_back(toDouble(g.value));
             continue;
         }
 

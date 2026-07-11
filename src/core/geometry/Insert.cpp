@@ -1,6 +1,7 @@
 #include "core/geometry/Insert.h"
 
 #include "core/geometry/AttDef.h"
+#include "core/geometry/ModifyOps.h"
 #include "core/geometry/Text.h"
 
 #include <algorithm>
@@ -42,6 +43,17 @@ std::vector<std::unique_ptr<Entity>> InsertEntity::instantiate() const {
                                                 attdef.height(), attdef.rotation());
         } else {
             copy = child->clone();
+        }
+        if (m_block->dynamicParam && std::abs(m_dynamicStretch) > 1e-9) {
+            const auto& dp = *m_block->dynamicParam;
+            const Point2D axis = dp.endPoint - dp.basePoint;
+            const double len = axis.length();
+            if (len > 1e-9) {
+                BoundingBox frame;
+                frame.expand(dp.frameMin);
+                frame.expand(dp.frameMax);
+                copy = stretchedClone(*copy, frame, axis * (m_dynamicStretch / len));
+            }
         }
         copy->scale(Point2D(0, 0), m_scale);
         copy->rotate(Point2D(0, 0), m_rotation);
@@ -85,11 +97,33 @@ void InsertEntity::mirror(const Point2D& a, const Point2D& b) {
 }
 
 std::vector<Point2D> InsertEntity::gripPoints() const {
-    return {m_position};
+    std::vector<Point2D> pts{m_position};
+    if (m_block && m_block->dynamicParam) {
+        const auto& dp = *m_block->dynamicParam;
+        const Point2D axis = dp.endPoint - dp.basePoint;
+        const double len = axis.length();
+        Point2D local = len > 1e-9 ? dp.endPoint + axis * (m_dynamicStretch / len) : dp.endPoint;
+        local = scaleAround(local, Point2D(0, 0), m_scale);
+        local = rotateAround(local, Point2D(0, 0), m_rotation);
+        pts.push_back(local + m_position);
+    }
+    return pts;
 }
 
 void InsertEntity::moveGripPoint(std::size_t index, const Point2D& newPos) {
-    if (index == 0) m_position = newPos;
+    if (index == 0) {
+        m_position = newPos;
+        return;
+    }
+    if (index == 1 && m_block && m_block->dynamicParam) {
+        const auto& dp = *m_block->dynamicParam;
+        Point2D local = newPos - m_position;
+        local = rotateAround(local, Point2D(0, 0), -m_rotation);
+        if (std::abs(m_scale) > 1e-9) local = local * (1.0 / m_scale);
+        const Point2D axis = dp.endPoint - dp.basePoint;
+        const double len = axis.length();
+        if (len > 1e-9) m_dynamicStretch = (local - dp.endPoint).dot(axis * (1.0 / len));
+    }
 }
 
 std::vector<SnapPoint> InsertEntity::snapCandidates() const {

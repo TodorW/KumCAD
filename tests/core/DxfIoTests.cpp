@@ -356,6 +356,44 @@ TEST_CASE("DXF gradient hatch round-trips", "[dxf][hatch][gradient]") {
     REQUIRE(loadedHatch->colorOverride()->r == 200);
 }
 
+TEST_CASE("DXF dynamic block linear parameter round-trips", "[dxf][block][dynamic]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    std::vector<std::unique_ptr<lcad::Entity>> children;
+    children.push_back(
+        std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0), lcad::Point2D(10, 0)));
+    doc.addBlock("bar", std::move(children));
+    lcad::BlockDefinition* block = doc.findBlock("bar");
+    lcad::DynamicLinearParameter dp;
+    dp.basePoint = lcad::Point2D(0, 0);
+    dp.endPoint = lcad::Point2D(10, 0);
+    dp.frameMin = lcad::Point2D(8, -1);
+    dp.frameMax = lcad::Point2D(12, 1);
+    block->dynamicParam = dp;
+
+    auto insert = std::make_unique<lcad::InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block,
+                                                        lcad::Point2D(20, 20));
+    insert->setDynamicStretch(5.0);
+    doc.addEntity(std::move(insert));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const lcad::BlockDefinition* loadedBlock = loaded.findBlock("bar");
+    REQUIRE(loadedBlock != nullptr);
+    REQUIRE(loadedBlock->isDynamic());
+    REQUIRE(loadedBlock->dynamicParam->endPoint.x == Approx(10.0));
+    REQUIRE(loadedBlock->dynamicParam->frameMax.x == Approx(12.0));
+
+    // The insert itself doesn't persist its per-instance stretch (not
+    // implemented -- see the DynamicLinearParameter comment); each reload
+    // starts at the block's default (unstretched) shape.
+    REQUIRE(loaded.entities().size() == 1);
+    REQUIRE(loaded.entities().front()->type() == lcad::EntityType::Insert);
+}
+
 TEST_CASE("DXF block definitions and inserts round-trip", "[dxf][block]") {
     TempDxfPath temp;
 

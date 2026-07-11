@@ -120,6 +120,8 @@ add_executable(kumcad
     commands/ArrayCommand.cpp
     commands/BlockCommand.h
     commands/BlockCommand.cpp
+    commands/BlockParamCommand.h
+    commands/BlockParamCommand.cpp
     commands/InsertCommand.h
     commands/InsertCommand.cpp
     commands/LeaderCommand.h

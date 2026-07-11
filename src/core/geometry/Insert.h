@@ -31,6 +31,13 @@ public:
     double scaleFactor() const { return m_scale; }
     double rotation() const { return m_rotation; }
 
+    // How far this particular instance's dynamic linear parameter (if the
+    // block has one) has been dragged from its default endPoint, along the
+    // parameter's axis, in block-local units. Per-instance: two inserts of
+    // the same dynamic block can be stretched independently.
+    double dynamicStretch() const { return m_dynamicStretch; }
+    void setDynamicStretch(double stretch) { m_dynamicStretch = stretch; }
+
     // The block's children transformed into world space (scale, then rotate,
     // then translate) -- what rendering, hit-testing, and explode all share.
     std::vector<std::unique_ptr<Entity>> instantiate() const;
@@ -54,6 +61,7 @@ private:
     Point2D m_position;
     double m_scale;
     double m_rotation;
+    double m_dynamicStretch = 0.0;
     std::vector<std::pair<std::string, std::string>> m_attributes;
 };
 

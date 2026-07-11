@@ -9,6 +9,7 @@
 #include "commands/AreaCommand.h"
 #include "commands/ArrayCommand.h"
 #include "commands/BlockCommand.h"
+#include "commands/BlockParamCommand.h"
 #include "commands/BreakCommand.h"
 #include "commands/CircleCommand.h"
 #include "commands/CopyCommand.h"
@@ -270,6 +271,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
     } else if (cmd == QLatin1String("BLOCK") || cmd == QLatin1String("B")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) startCommand(std::make_unique<BlockCommand>(m_document, ids), QStringLiteral("BLOCK"));
+    } else if (cmd == QLatin1String("BPARAMETER") || cmd == QLatin1String("PAR")) {
+        startCommand(std::make_unique<BlockParamCommand>(m_document), QStringLiteral("BPARAMETER"));
     } else if (cmd == QLatin1String("INSERT") || cmd == QLatin1String("I")) {
         startCommand(std::make_unique<InsertCommand>(m_document), QStringLiteral("INSERT"));
     } else if (cmd == QLatin1String("ARRAY") || cmd == QLatin1String("AR")) {

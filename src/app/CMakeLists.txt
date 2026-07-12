@@ -108,6 +108,8 @@ add_executable(kumcad
     commands/FindCommand.cpp
     commands/QSelectCommand.h
     commands/QSelectCommand.cpp
+    commands/QuickCalcCommand.h
+    commands/QuickCalcCommand.cpp
     commands/HatchCommand.h
     commands/HatchCommand.cpp
     commands/DimCommand.h

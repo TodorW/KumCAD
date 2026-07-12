@@ -42,6 +42,7 @@
 #include "commands/PointCommands.h"
 #include "commands/MTextCommand.h"
 #include "commands/QSelectCommand.h"
+#include "commands/QuickCalcCommand.h"
 #include "commands/MirrorCommand.h"
 #include "commands/MviewCommand.h"
 #include "commands/MoveCommand.h"
@@ -333,6 +334,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<QSelectCommand>(m_document), QStringLiteral("QSELECT"));
     } else if (cmd == QLatin1String("FIND")) {
         startCommand(std::make_unique<FindCommand>(m_document), QStringLiteral("FIND"));
+    } else if (cmd == QLatin1String("QUICKCALC") || cmd == QLatin1String("CAL") || cmd == QLatin1String("QC")) {
+        startCommand(std::make_unique<QuickCalcCommand>(), QStringLiteral("QUICKCALC"));
     } else if (cmd == QLatin1String("AREA") || cmd == QLatin1String("AA")) {
         startCommand(std::make_unique<AreaCommand>(), QStringLiteral("AREA"));
     } else if (cmd == QLatin1String("DIST") || cmd == QLatin1String("DI")) {

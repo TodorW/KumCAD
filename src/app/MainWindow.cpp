@@ -11,6 +11,7 @@
 #include "SheetSetPanel.h"
 #include "DesignCenterPanel.h"
 #include "MarkupSetPanel.h"
+#include "PrintRenderer.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/PointCloud.h"
 #include "core/io/DwgReader.h"
@@ -41,7 +42,6 @@
 #include <QVBoxLayout>
 #include <QToolBar>
 
-#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -564,114 +564,15 @@ void MainWindow::eTransmit() {
     statusBar()->showMessage(message, 5000);
 }
 
-void MainWindow::renderLayout(QPrinter& printer, const lcad::Layout& layout) {
-    QPainter painter(&printer);
-    painter.setRenderHint(QPainter::Antialiasing);
-    const QRect viewport = painter.viewport();
-    painter.fillRect(viewport, Qt::white);
-
-    // Fit the sheet to the page (the sheet itself prints without a border).
-    const double margin = 1.02;
-    const double scale =
-        std::min(viewport.width() / (layout.paperWidth * margin), viewport.height() / (layout.paperHeight * margin));
-    const QPointF pageCenter = QRectF(viewport).center();
-    const double cx = layout.paperWidth / 2.0;
-    const double cy = layout.paperHeight / 2.0;
-    const auto paperToPage = [scale, cx, cy, pageCenter](const lcad::Point2D& p) {
-        return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
-    };
-
-    // A plotted lineweight of 0mm still needs to show up as a hairline.
-    const auto penWidthFor = [&printer](double lineweightMm) {
-        return std::max(1.0, lineweightMm * printer.resolution() / 25.4);
-    };
-    for (const lcad::Viewport& vp : layout.viewports) {
-        const QPointF tl = paperToPage(
-            lcad::Point2D(vp.paperCenter.x - vp.paperWidth / 2.0, vp.paperCenter.y + vp.paperHeight / 2.0));
-        const QPointF br = paperToPage(
-            lcad::Point2D(vp.paperCenter.x + vp.paperWidth / 2.0, vp.paperCenter.y - vp.paperHeight / 2.0));
-        painter.save();
-        painter.setClipRect(QRectF(tl, br).normalized());
-        const auto toScreen = [&](const lcad::Point2D& p) {
-            return paperToPage(vp.paperCenter + (p - vp.modelCenter) * vp.viewScale);
-        };
-        const double effScale = vp.viewScale * scale;
-        for (const lcad::Entity* e : m_document.entities()) {
-            const lcad::Layer* layer = m_document.findLayer(e->layer());
-            if (layer && !layer->visible) continue;
-            const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
-            QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
-            if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
-            EntityPainter::paint(painter, *e, toScreen, effScale, color, penWidthFor(appearance.lineweight),
-                                 appearance.linetype, m_document.lineTypeScale(), &m_document);
-        }
-        painter.restore();
-    }
-
-    // Entities drawn directly on the sheet (title blocks, notes).
-    const int layoutIndex = static_cast<int>(&layout - m_document.layouts().data());
-    for (const lcad::Entity* e : m_document.paperEntities(layoutIndex)) {
-        const lcad::Layer* layer = m_document.findLayer(e->layer());
-        if (layer && !layer->visible) continue;
-        const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
-        QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
-        if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
-        EntityPainter::paint(painter, *e, paperToPage, scale, color, penWidthFor(appearance.lineweight),
-                             appearance.linetype, m_document.lineTypeScale(), &m_document);
-    }
-}
-
 void MainWindow::renderDrawing(QPrinter& printer) {
+    const lcad::Layout* layout = nullptr;
     if (m_view->inLayoutMode()) {
         const int index = m_view->activeLayoutIndex();
         if (index >= 0 && index < static_cast<int>(m_document.layouts().size())) {
-            renderLayout(printer, m_document.layouts()[index]);
-            return;
+            layout = &m_document.layouts()[index];
         }
     }
-
-    lcad::BoundingBox box;
-    const auto entities = m_document.entities();
-    for (const lcad::Entity* e : entities) {
-        const lcad::Layer* layer = m_document.findLayer(e->layer());
-        if (layer && !layer->visible) continue;
-        box.expand(e->boundingBox());
-    }
-
-    QPainter painter(&printer);
-    painter.setRenderHint(QPainter::Antialiasing);
-    const QRect viewport = painter.viewport();
-    painter.fillRect(viewport, Qt::white);
-
-    if (!box.isValid()) {
-        painter.drawText(viewport, Qt::AlignCenter, QStringLiteral("(empty drawing)"));
-        return;
-    }
-
-    const double w = std::max(box.max.x - box.min.x, 1e-6);
-    const double h = std::max(box.max.y - box.min.y, 1e-6);
-    const double margin = 1.1;
-    const double scale = std::min(viewport.width() / (w * margin), viewport.height() / (h * margin));
-    const double cx = (box.min.x + box.max.x) / 2.0;
-    const double cy = (box.min.y + box.max.y) / 2.0;
-    const QPointF pageCenter = QRectF(viewport).center();
-    const auto toScreen = [scale, cx, cy, pageCenter](const lcad::Point2D& p) {
-        return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
-    };
-
-    for (const lcad::Entity* e : entities) {
-        const lcad::Layer* layer = m_document.findLayer(e->layer());
-        if (layer && !layer->visible) continue;
-
-        const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
-        // Colors that read well on the dark canvas vanish on paper.
-        QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
-        if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
-        const double penWidth = std::max(1.0, appearance.lineweight * printer.resolution() / 25.4);
-
-        EntityPainter::paint(painter, *e, toScreen, scale, color, penWidth, appearance.linetype,
-                             m_document.lineTypeScale(), &m_document);
-    }
+    renderDocumentPage(printer, m_document, layout);
 }
 
 bool MainWindow::saveDocumentAs() {

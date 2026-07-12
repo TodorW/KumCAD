@@ -70,7 +70,6 @@ private:
     // mapped to black): model extents in model space, or the active layout's
     // sheet with its viewports when a layout tab is current.
     void renderDrawing(QPrinter& printer);
-    void renderLayout(QPrinter& printer, const lcad::Layout& layout);
 
     lcad::Document m_document;
     DrawingView* m_view = nullptr;

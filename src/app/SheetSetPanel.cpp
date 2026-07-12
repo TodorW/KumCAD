@@ -1,5 +1,7 @@
 #include "SheetSetPanel.h"
 
+#include "PrintRenderer.h"
+
 #include "core/document/Document.h"
 #include "core/io/DwgReader.h"
 #include "core/io/DxfReader.h"
@@ -13,6 +15,8 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPrinter>
 #include <QPushButton>
 #include <QTextStream>
 #include <QVBoxLayout>
@@ -51,6 +55,8 @@ SheetSetPanel::SheetSetPanel(QWidget* parent) : QWidget(parent) {
     connect(saveButton, &QPushButton::clicked, this, &SheetSetPanel::onSaveSet);
     auto* loadButton = new QPushButton(QStringLiteral("Load Set..."), this);
     connect(loadButton, &QPushButton::clicked, this, &SheetSetPanel::onLoadSet);
+    auto* publishButton = new QPushButton(QStringLiteral("Publish..."), this);
+    connect(publishButton, &QPushButton::clicked, this, &SheetSetPanel::onPublish);
 
     auto* buttonRow1 = new QHBoxLayout();
     buttonRow1->addWidget(addButton);
@@ -65,6 +71,7 @@ SheetSetPanel::SheetSetPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(m_list);
     layout->addLayout(buttonRow1);
     layout->addLayout(buttonRow2);
+    layout->addWidget(publishButton);
 }
 
 void SheetSetPanel::refreshList() {
@@ -152,6 +159,64 @@ void SheetSetPanel::onLoadSet() {
     m_sheets = loaded;
     m_setPath = path;
     refreshList();
+}
+
+void SheetSetPanel::onPublish() {
+    if (m_sheets.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Publish"), QStringLiteral("The sheet set is empty."));
+        return;
+    }
+    QString path =
+        QFileDialog::getSaveFileName(this, QStringLiteral("Publish Sheet Set"), QString(), QStringLiteral("PDF Files (*.pdf)"));
+    if (path.isEmpty()) return;
+    if (!path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) path += QStringLiteral(".pdf");
+
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(path);
+
+    QPainter painter(&printer);
+    int published = 0;
+    QStringList failed;
+    bool firstPage = true;
+    for (const Sheet& sheet : m_sheets) {
+        lcad::Document scratch;
+        const bool isDwg = sheet.filePath.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive);
+        const bool ok = isDwg ? lcad::readDwg(scratch, sheet.filePath.toStdString())
+                              : lcad::readDxf(scratch, sheet.filePath.toStdString());
+        if (!ok) {
+            failed << sheet.title;
+            continue;
+        }
+        const lcad::Layout* layout = nullptr;
+        if (!sheet.layoutName.isEmpty()) {
+            for (const lcad::Layout& l : scratch.layouts()) {
+                if (QString::fromStdString(l.name) == sheet.layoutName) {
+                    layout = &l;
+                    break;
+                }
+            }
+        }
+        if (!firstPage) printer.newPage();
+        firstPage = false;
+        renderDocumentPage(painter, printer.resolution(), scratch, layout);
+        ++published;
+    }
+    painter.end();
+
+    if (published == 0) {
+        QFile::remove(path); // nothing rendered; don't leave a blank/broken PDF behind
+        QMessageBox::warning(this, QStringLiteral("Publish"), QStringLiteral("No sheets could be published."));
+        return;
+    }
+
+    QString message = QStringLiteral("Published %1 sheet(s) to %2").arg(published).arg(QFileInfo(path).fileName());
+    if (!failed.isEmpty()) {
+        message += QStringLiteral("\n%1 sheet(s) could not be read: %2")
+                       .arg(failed.size())
+                       .arg(failed.join(QStringLiteral(", ")));
+    }
+    QMessageBox::information(this, QStringLiteral("Publish"), message);
 }
 
 void SheetSetPanel::onItemDoubleClicked(QListWidgetItem* item) {

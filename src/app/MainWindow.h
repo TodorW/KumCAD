@@ -12,6 +12,7 @@ class CommandDispatcher;
 class LayerPanel;
 class PropertiesPanel;
 class ToolPalette;
+class SheetSetPanel;
 class QLabel;
 class QPrinter;
 class QTabBar;
@@ -20,6 +21,11 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+
+    // Sheet Set Manager: loads path like loadFromPath(), then switches to
+    // the layout named layoutName if it has one (Model space if empty or
+    // not found). Confirms discarding unsaved changes first, like Open.
+    void openSheet(const QString& path, const QString& layoutName);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -42,6 +48,12 @@ private:
 
     void newDocument();
     void openDocument();
+    // Loads path (DXF or DWG) into m_document and refreshes the UI, the
+    // part of openDocument() after the file picker -- reused by
+    // openSheet() (Sheet Set Manager) so it can load a specific known file
+    // without prompting. Returns false (with a warning dialog already
+    // shown) on failure.
+    bool loadFromPath(const QString& path);
     bool saveDocument();
     bool saveDocumentAs();
 
@@ -60,6 +72,7 @@ private:
     LayerPanel* m_layerPanel = nullptr;
     PropertiesPanel* m_propertiesPanel = nullptr;
     ToolPalette* m_toolPalette = nullptr;
+    SheetSetPanel* m_sheetSetPanel = nullptr;
     QTabBar* m_spaceTabs = nullptr;
     QLabel* m_coordLabel = nullptr;
     QLabel* m_osnapLabel = nullptr;

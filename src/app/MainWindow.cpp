@@ -8,6 +8,7 @@
 #include "LayerPanel.h"
 #include "PropertiesPanel.h"
 #include "ToolPalette.h"
+#include "SheetSetPanel.h"
 #include "core/io/DwgReader.h"
 #include "core/io/DwgWriter.h"
 #include "core/io/DxfReader.h"
@@ -167,6 +168,16 @@ void MainWindow::setupDocks() {
     toolPaletteDock->setWidget(m_toolPalette);
     addDockWidget(Qt::RightDockWidgetArea, toolPaletteDock);
     tabifyDockWidget(propertiesDock, toolPaletteDock);
+
+    m_sheetSetPanel = new SheetSetPanel(this);
+    connect(m_sheetSetPanel, &SheetSetPanel::sheetOpenRequested, this, &MainWindow::openSheet);
+
+    auto* sheetSetDock = new QDockWidget(QStringLiteral("Sheet Set Manager"), this);
+    sheetSetDock->setObjectName(QStringLiteral("SheetSetDock"));
+    sheetSetDock->setWidget(m_sheetSetPanel);
+    addDockWidget(Qt::RightDockWidgetArea, sheetSetDock);
+    tabifyDockWidget(toolPaletteDock, sheetSetDock);
+
     layerDock->raise();
 }
 
@@ -364,13 +375,17 @@ void MainWindow::openDocument() {
     const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Open Drawing"), QString(), filter);
     if (path.isEmpty()) return;
 
+    loadFromPath(path);
+}
+
+bool MainWindow::loadFromPath(const QString& path) {
     const bool isDwg = path.endsWith(QStringLiteral(".dwg"), Qt::CaseInsensitive);
     std::string error;
     const bool ok = isDwg ? lcad::readDwg(m_document, path.toStdString(), &error)
                           : lcad::readDxf(m_document, path.toStdString(), &error);
     if (!ok) {
         QMessageBox::warning(this, QStringLiteral("Open Failed"), QString::fromStdString(error));
-        return;
+        return false;
     }
 
     const int refreshedXrefs = lcad::reloadAllXrefs(m_document, QFileInfo(path).absolutePath().toStdString());
@@ -388,6 +403,23 @@ void MainWindow::openDocument() {
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Opened %1").arg(QFileInfo(path).fileName()), 3000);
+    return true;
+}
+
+void MainWindow::openSheet(const QString& path, const QString& layoutName) {
+    if (!confirmDiscardUnsavedChanges()) return;
+    if (!loadFromPath(path)) return;
+
+    if (!layoutName.isEmpty()) {
+        for (int i = 1; i < m_spaceTabs->count(); ++i) {
+            if (m_spaceTabs->tabText(i) == layoutName) {
+                m_spaceTabs->setCurrentIndex(i);
+                return;
+            }
+        }
+        statusBar()->showMessage(
+            QStringLiteral("Sheet's layout \"%1\" not found -- showing Model space").arg(layoutName), 4000);
+    }
 }
 
 bool MainWindow::saveDocument() {

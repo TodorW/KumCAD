@@ -31,6 +31,7 @@ enum class EntityType {
     ConstructionLine, // XLINE / RAY
     AttDef,           // attribute definition inside a block
     Table,            // TABLE grid of cell text
+    Image,            // IMAGE raster underlay
 };
 
 // Object-snap candidate kinds, mirroring AutoCAD's OSNAP markers. The first

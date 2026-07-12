@@ -90,6 +90,8 @@ add_executable(kumcad
     commands/MatchPropCommand.h
     commands/LweightCommand.h
     commands/IdCommand.h
+    commands/ImageAttachCommand.h
+    commands/ImageAttachCommand.cpp
     commands/AttDefCommand.h
     commands/AttDefCommand.cpp
     commands/CopyCommand.h

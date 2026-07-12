@@ -7,6 +7,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -286,6 +287,10 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::vector<double> tableRowHeights;
     std::vector<double> tableColWidths;
     std::vector<std::string> tableCells;
+    std::string imagePath;           // IMAGE group 1
+    double imageWidth = 0.0;         // IMAGE group 40
+    double imageHeight = 0.0;        // IMAGE group 41
+    double imageRotationDeg = 0.0;   // IMAGE group 50
     double mleaderArrowSize = 1.25;  // MULTILEADER group 40
     std::vector<Point2D> mleaderPoints; // flat, split into legs via mleaderLegSizes
     std::vector<int> mleaderLegSizes;   // one entry per leg, in order (group 70)
@@ -437,6 +442,9 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             tableCells.resize(static_cast<std::size_t>(tableRows) * tableCols);
             made = std::make_unique<TableEntity>(id, layerId, p10, tableRowHeights, tableColWidths, tableCells,
                                                  tableTextHeight);
+        } else if (curEntityType == "IMAGE" && !imagePath.empty() && imageWidth > 1e-9 && imageHeight > 1e-9) {
+            made = std::make_unique<ImageEntity>(id, layerId, imagePath, p10, imageWidth, imageHeight,
+                                                 imageRotationDeg * M_PI / 180.0);
         } else if (curEntityType == "MULTILEADER" && !mleaderLegSizes.empty()) {
             std::vector<std::vector<Point2D>> legs;
             std::size_t idx = 0;
@@ -527,6 +535,10 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         tableRowHeights.clear();
         tableColWidths.clear();
         tableCells.clear();
+        imagePath.clear();
+        imageWidth = 0.0;
+        imageHeight = 0.0;
+        imageRotationDeg = 0.0;
         mleaderArrowSize = 1.25;
         mleaderPoints.clear();
         mleaderLegSizes.clear();
@@ -846,6 +858,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "VIEWPORT") vpWidth = toDouble(g.value);
             else if (curEntityType == "ACAD_TABLE") tableTextHeight = toDouble(g.value, 2.5);
             else if (curEntityType == "MULTILEADER") mleaderArrowSize = toDouble(g.value, 1.25);
+            else if (curEntityType == "IMAGE") imageWidth = toDouble(g.value);
             else radius = toDouble(g.value);
             break;
         case 41:
@@ -853,6 +866,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "HATCH") hatchScale = toDouble(g.value, 1.0);
             else if (curEntityType == "MTEXT") mtextWidth = toDouble(g.value);
             else if (curEntityType == "VIEWPORT") vpHeight = toDouble(g.value);
+            else if (curEntityType == "IMAGE") imageHeight = toDouble(g.value);
             break;
         case 12:
             if (curEntityType == "VIEWPORT") vpViewCenter.x = toDouble(g.value);
@@ -873,6 +887,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         case 50:
             if (curEntityType == "TEXT" || curEntityType == "MTEXT" || curEntityType == "ATTDEF" ||
                 curEntityType == "ATTRIB") textRotationDeg = toDouble(g.value);
+            else if (curEntityType == "IMAGE") imageRotationDeg = toDouble(g.value);
             else startAngleDeg = toDouble(g.value);
             break;
         case 51:
@@ -936,6 +951,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             if (curEntityType == "TEXT" || curEntityType == "MTEXT" || curEntityType == "ATTDEF" ||
                 curEntityType == "ATTRIB") textContent = g.value;
             else if (curEntityType == "ACAD_TABLE") tableCells.push_back(g.value);
+            else if (curEntityType == "IMAGE") imagePath = g.value;
             break;
         case 3:
             if (curEntityType == "MTEXT") mtextChunks += g.value;

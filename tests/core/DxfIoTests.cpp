@@ -7,6 +7,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -392,6 +393,29 @@ TEST_CASE("DXF dynamic block linear parameter round-trips", "[dxf][block][dynami
     // starts at the block's default (unstretched) shape.
     REQUIRE(loaded.entities().size() == 1);
     REQUIRE(loaded.entities().front()->type() == lcad::EntityType::Insert);
+}
+
+TEST_CASE("DXF image underlay round-trips", "[dxf][image]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addEntity(std::make_unique<lcad::ImageEntity>(doc.reserveEntityId(), doc.currentLayer(), "/tmp/site-plan.png",
+                                                       lcad::Point2D(5, 10), 40.0, 30.0, M_PI / 6));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 1);
+    REQUIRE(entities[0]->type() == lcad::EntityType::Image);
+    const auto* image = static_cast<const lcad::ImageEntity*>(entities[0]);
+    REQUIRE(image->path() == "/tmp/site-plan.png");
+    REQUIRE(image->position().x == Approx(5.0));
+    REQUIRE(image->position().y == Approx(10.0));
+    REQUIRE(image->width() == Approx(40.0));
+    REQUIRE(image->height() == Approx(30.0));
+    REQUIRE(image->rotation() == Approx(M_PI / 6));
 }
 
 TEST_CASE("DXF block definitions and inserts round-trip", "[dxf][block]") {

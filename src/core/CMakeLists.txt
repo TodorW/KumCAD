@@ -47,6 +47,8 @@ add_library(lcad_core STATIC
     geometry/Intersect.cpp
     geometry/BoundaryTrace.h
     geometry/BoundaryTrace.cpp
+    geometry/Image.h
+    geometry/Image.cpp
     util/Expr.h
     util/Expr.cpp
     lisp/LispInterpreter.h

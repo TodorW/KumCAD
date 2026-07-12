@@ -26,6 +26,7 @@
 #include "commands/GradientCommand.h"
 #include "commands/GroupCommand.h"
 #include "commands/IdCommand.h"
+#include "commands/ImageAttachCommand.h"
 #include "commands/HatchCommand.h"
 #include "commands/InsertCommand.h"
 #include "commands/LayoutCommand.h"
@@ -362,6 +363,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<AttDefCommand>(m_document), QStringLiteral("ATTDEF"));
     } else if (cmd == QLatin1String("ID")) {
         startCommand(std::make_unique<IdCommand>(), QStringLiteral("ID"));
+    } else if (cmd == QLatin1String("IMAGEATTACH") || cmd == QLatin1String("IAT")) {
+        startCommand(std::make_unique<ImageAttachCommand>(m_document), QStringLiteral("IMAGEATTACH"));
     } else if (cmd == QLatin1String("PURGE") || cmd == QLatin1String("PU")) {
         const lcad::Document::PurgeResult purged = m_document.purge();
         m_commandLine.appendLine(QStringLiteral("*Purged %1 block(s) and %2 layer(s)*")

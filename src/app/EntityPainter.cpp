@@ -7,6 +7,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -23,11 +24,13 @@
 #include <QFontMetricsF>
 #include <QLinearGradient>
 #include <QPainter>
+#include <QPixmap>
 #include <QPainterPath>
 #include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace EntityPainter {
 
@@ -351,6 +354,37 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
                 painter.drawText(rect, Qt::AlignVCenter | Qt::AlignLeft | Qt::TextSingleLine,
                                  QString::fromStdString(text));
             }
+        }
+        painter.restore();
+        break;
+    }
+    case lcad::EntityType::Image: {
+        const auto& image = static_cast<const lcad::ImageEntity&>(entity);
+        // Process-wide pixmap cache keyed by path: entities repaint every
+        // frame, loading from disk each time would be far too slow.
+        static std::unordered_map<std::string, QPixmap> cache;
+        auto it = cache.find(image.path());
+        if (it == cache.end()) {
+            QPixmap pixmap;
+            pixmap.load(QString::fromStdString(image.path()));
+            it = cache.emplace(image.path(), std::move(pixmap)).first;
+        }
+        const QPixmap& pixmap = it->second;
+
+        painter.save();
+        painter.translate(toScreen(image.position()));
+        painter.rotate(-qRadiansToDegrees(image.rotation())); // same sign flip as the Text case
+        const double w = image.width() * scale;
+        const double h = image.height() * scale;
+        const QRectF target(0, -h, w, h); // position is the bottom-left corner, screen y is flipped
+        if (!pixmap.isNull()) {
+            painter.drawPixmap(target, pixmap, pixmap.rect());
+        } else {
+            painter.setPen(QPen(color, 1, Qt::DashLine));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(target);
+            painter.drawLine(target.topLeft(), target.bottomRight());
+            painter.drawLine(target.topRight(), target.bottomLeft());
         }
         painter.restore();
         break;

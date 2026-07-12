@@ -5,6 +5,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Intersect.h"
 #include "core/geometry/Line.h"
@@ -471,6 +472,25 @@ TEST_CASE("HatchEntity containment and distance", "[geometry][hatch]") {
     const auto box = hatch.boundingBox();
     REQUIRE(box.max.x == Approx(10.0));
     REQUIRE(box.max.y == Approx(10.0));
+}
+
+TEST_CASE("ImageEntity hit-tests, rotates, and scales its rectangle", "[geometry][image]") {
+    lcad::ImageEntity image(1, 0, "photo.png", lcad::Point2D(0, 0), 10.0, 5.0);
+
+    REQUIRE(image.boundingBox().max.x == Approx(10.0));
+    REQUIRE(image.boundingBox().max.y == Approx(5.0));
+    REQUIRE(image.distanceTo(lcad::Point2D(5, 2)) == Approx(0.0)); // inside
+    REQUIRE(image.distanceTo(lcad::Point2D(15, 2)) == Approx(5.0)); // 5 units right of the edge
+
+    image.scale(lcad::Point2D(0, 0), 2.0);
+    REQUIRE(image.width() == Approx(20.0));
+    REQUIRE(image.height() == Approx(10.0));
+
+    lcad::ImageEntity rotated(2, 0, "photo.png", lcad::Point2D(0, 0), 10.0, 5.0);
+    rotated.rotate(lcad::Point2D(0, 0), M_PI / 2);
+    // Rotated 90 degrees CCW about its own corner: the rectangle now
+    // extends up the +Y axis instead of along +X.
+    REQUIRE(rotated.distanceTo(lcad::Point2D(-2, 2)) == Approx(0.0));
 }
 
 TEST_CASE("InsertEntity transforms its block's children", "[geometry][block]") {

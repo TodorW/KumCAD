@@ -7,6 +7,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -287,6 +288,23 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
                 writeGroup(out, 31, 0.0);
             }
         }
+        break;
+    }
+    case EntityType::Image: {
+        // Simplified IMAGE: real DXF IMAGE references a separate IMAGEDEF
+        // object (in the OBJECTS section) by handle for the file path and
+        // pixel size; this carries the path directly on the entity, which
+        // round-trips within KumCAD and is safely skipped by other readers.
+        const auto& image = static_cast<const ImageEntity&>(e);
+        writeGroup(out, 0, "IMAGE");
+        writeCommon(out, document, e);
+        writeGroup(out, 1, image.path());
+        writeGroup(out, 10, image.position().x);
+        writeGroup(out, 20, image.position().y);
+        writeGroup(out, 30, 0.0);
+        writeGroup(out, 40, image.width());
+        writeGroup(out, 41, image.height());
+        writeGroup(out, 50, image.rotation() * 180.0 / M_PI);
         break;
     }
     case EntityType::MText: {

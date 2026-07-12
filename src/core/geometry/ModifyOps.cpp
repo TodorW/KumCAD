@@ -5,9 +5,11 @@
 #include "core/geometry/Circle.h"
 #include "core/geometry/ConstructionLine.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MText.h"
+#include "core/geometry/PointCloud.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Text.h"
@@ -111,6 +113,10 @@ std::unique_ptr<Entity> stretchedClone(const Entity& e, const BoundingBox& windo
         return translateIfInside(e, static_cast<const ConstructionLineEntity&>(e).basePoint(), window, delta);
     case EntityType::AttDef:
         return translateIfInside(e, static_cast<const AttDefEntity&>(e).position(), window, delta);
+    case EntityType::Image:
+        return translateIfInside(e, static_cast<const ImageEntity&>(e).position(), window, delta);
+    case EntityType::PointCloud:
+        return translateIfInside(e, static_cast<const PointCloudEntity&>(e).boundingBox().min, window, delta);
     case EntityType::Polyline:
     case EntityType::Spline:
     case EntityType::Hatch:

@@ -7,15 +7,19 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/AttDef.h"
 #include "core/geometry/ConstructionLine.h"
+#include "core/geometry/PointCloud.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
+#include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 
 #include <QColorDialog>
@@ -423,6 +427,42 @@ void PropertiesPanel::refresh() {
         addRow(QStringLiteral("Tag:"), QString::fromStdString(attdef->tag()));
         addRow(QStringLiteral("Prompt:"), QString::fromStdString(attdef->prompt()));
         addRow(QStringLiteral("Default:"), QString::fromStdString(attdef->defaultValue()));
+        break;
+    }
+    case lcad::EntityType::Image: {
+        const auto* image = static_cast<const lcad::ImageEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Image"));
+        addRow(QStringLiteral("Position X:"), formatNumber(image->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(image->position().y));
+        addRow(QStringLiteral("Width:"), formatNumber(image->width()));
+        addRow(QStringLiteral("Height:"), formatNumber(image->height()));
+        addRow(QStringLiteral("Rotation:"), formatDegrees(image->rotation()));
+        addRow(QStringLiteral("Path:"), QString::fromStdString(image->path()));
+        break;
+    }
+    case lcad::EntityType::MLeader: {
+        const auto* mleader = static_cast<const lcad::MLeaderEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Multileader"));
+        addRow(QStringLiteral("Landing X:"), formatNumber(mleader->landing().x));
+        addRow(QStringLiteral("Landing Y:"), formatNumber(mleader->landing().y));
+        addRow(QStringLiteral("Legs:"), QString::number(mleader->legs().size()));
+        addRow(QStringLiteral("Arrow Size:"), formatNumber(mleader->arrowSize()));
+        break;
+    }
+    case lcad::EntityType::PointCloud: {
+        const auto* cloud = static_cast<const lcad::PointCloudEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Point Cloud"));
+        addRow(QStringLiteral("Points:"), QString::number(cloud->points().size()));
+        addRow(QStringLiteral("Source:"), QString::fromStdString(cloud->path()));
+        break;
+    }
+    case lcad::EntityType::Table: {
+        const auto* table = static_cast<const lcad::TableEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Table"));
+        addRow(QStringLiteral("Position X:"), formatNumber(table->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(table->position().y));
+        addRow(QStringLiteral("Rows:"), QString::number(table->rows()));
+        addRow(QStringLiteral("Columns:"), QString::number(table->cols()));
         break;
     }
     }

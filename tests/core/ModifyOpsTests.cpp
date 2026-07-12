@@ -1,7 +1,9 @@
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
+#include "core/geometry/Image.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/ModifyOps.h"
+#include "core/geometry/PointCloud.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/SnapGeometry.h"
 
@@ -63,6 +65,29 @@ TEST_CASE("stretchedClone translates a circle only when its center is inside", "
     const auto moved = lcad::stretchedClone(circle, box(4, 4, 6, 6), lcad::Point2D(1, 1));
     REQUIRE(moved);
     REQUIRE(static_cast<const lcad::CircleEntity&>(*moved).center().x == Approx(6.0));
+}
+
+TEST_CASE("stretchedClone translates an image only when its position is inside", "[modifyops][regression]") {
+    // Regression: IMAGE had no case in stretchedClone's switch, so STRETCH
+    // silently no-opped on images even when their insertion point was
+    // inside the crossing window.
+    lcad::ImageEntity image(1, 0, "photo.png", lcad::Point2D(5, 5), 10.0, 8.0);
+
+    REQUIRE(lcad::stretchedClone(image, box(20, 20, 30, 30), lcad::Point2D(1, 1)) == nullptr);
+
+    const auto moved = lcad::stretchedClone(image, box(4, 4, 6, 6), lcad::Point2D(1, 1));
+    REQUIRE(moved);
+    REQUIRE(static_cast<const lcad::ImageEntity&>(*moved).position().x == Approx(6.0));
+}
+
+TEST_CASE("stretchedClone translates a point cloud only when it's inside", "[modifyops][regression]") {
+    lcad::PointCloudEntity cloud(1, 0, "scan.xyz", {{5, 5}, {6, 6}});
+
+    REQUIRE(lcad::stretchedClone(cloud, box(20, 20, 30, 30), lcad::Point2D(1, 1)) == nullptr);
+
+    const auto moved = lcad::stretchedClone(cloud, box(4, 4, 6, 6), lcad::Point2D(1, 1));
+    REQUIRE(moved);
+    REQUIRE(static_cast<const lcad::PointCloudEntity&>(*moved).points()[0].x == Approx(6.0));
 }
 
 TEST_CASE("curveLength measures lines, arcs, and open polylines", "[modifyops]") {

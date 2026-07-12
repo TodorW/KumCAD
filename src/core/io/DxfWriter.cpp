@@ -507,6 +507,14 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
     writeGroup(out, 40, document.pointSize());
     writeGroup(out, 9, "$KUMCAD_ANNOSCALE"); // this codebase's simplified CANNOSCALE
     writeGroup(out, 40, document.annotationScale());
+    if (const auto& geo = document.geoLocation()) {
+        writeGroup(out, 9, "$KUMCAD_GEOLOCATION"); // this codebase's simplified GEOGRAPHICLOCATION
+        writeGroup(out, 10, geo->designPoint.x);
+        writeGroup(out, 20, geo->designPoint.y);
+        writeGroup(out, 40, geo->latitude);
+        writeGroup(out, 41, geo->longitude);
+        writeGroup(out, 50, geo->northRotation * 180.0 / M_PI);
+    }
     writeGroup(out, 0, "ENDSEC");
 
     writeGroup(out, 0, "SECTION");

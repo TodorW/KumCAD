@@ -29,6 +29,17 @@ struct NamedDimStyle {
     DimStyle style;
 };
 
+// AutoCAD's GEOGRAPHICLOCATION: ties one world-space point to a real-world
+// latitude/longitude, plus which world-space direction is true north.
+// Simplified: no coordinate system (CRS) selection or map/imagery display,
+// just the reference point + rotation AutoCAD's own dialog also collects.
+struct GeoLocation {
+    Point2D designPoint;
+    double latitude = 0.0;
+    double longitude = 0.0;
+    double northRotation = 0.0; // radians CCW from world +Y to true north
+};
+
 // Multileader style values (a MLEADERSTYLE-lite): new MLEADERs snapshot the
 // current style's values at creation, like DimStyle. landingGap is a
 // multiple of textHeight, matching LEADER's hardcoded text offset.
@@ -185,6 +196,10 @@ public:
     // last layout. Returns false when index is invalid.
     bool removeLayout(int index);
 
+    // GEOGRAPHICLOCATION: nullopt when the drawing has none set.
+    const std::optional<GeoLocation>& geoLocation() const { return m_geoLocation; }
+    void setGeoLocation(std::optional<GeoLocation> geo) { m_geoLocation = geo; }
+
     // Document-wide annotation scale (a simplified CANNOSCALE): text/mtext
     // using an Annotative TextStyle renders at height * annotationScale, so
     // it reads the same physical size once you match this to your plot
@@ -218,6 +233,7 @@ private:
     std::vector<Layout> m_layouts{Layout{}};
     int m_activeSpace = -1; // -1 = model space, otherwise a layout index
     double m_annotationScale = 1.0;
+    std::optional<GeoLocation> m_geoLocation;
 
     NamedDimStyle& currentNamedDimStyle();
     const NamedDimStyle& currentNamedDimStyle() const;

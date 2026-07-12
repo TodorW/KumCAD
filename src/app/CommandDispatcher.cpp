@@ -22,6 +22,7 @@
 #include "commands/EllipseCommand.h"
 #include "commands/ExtendCommand.h"
 #include "commands/FilletCommand.h"
+#include "commands/GeoLocationCommand.h"
 #include "commands/FindCommand.h"
 #include "commands/GradientCommand.h"
 #include "commands/GroupCommand.h"
@@ -365,6 +366,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<IdCommand>(), QStringLiteral("ID"));
     } else if (cmd == QLatin1String("IMAGEATTACH") || cmd == QLatin1String("IAT")) {
         startCommand(std::make_unique<ImageAttachCommand>(m_document), QStringLiteral("IMAGEATTACH"));
+    } else if (cmd == QLatin1String("GEOGRAPHICLOCATION") || cmd == QLatin1String("GEO")) {
+        startCommand(std::make_unique<GeoLocationCommand>(m_document), QStringLiteral("GEOGRAPHICLOCATION"));
     } else if (cmd == QLatin1String("PURGE") || cmd == QLatin1String("PU")) {
         const lcad::Document::PurgeResult purged = m_document.purge();
         m_commandLine.appendLine(QStringLiteral("*Purged %1 block(s) and %2 layer(s)*")

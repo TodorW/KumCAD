@@ -112,6 +112,8 @@ add_executable(kumcad
     commands/TrimCommand.cpp
     commands/ExtendCommand.h
     commands/ExtendCommand.cpp
+    commands/GeoLocationCommand.h
+    commands/GeoLocationCommand.cpp
     commands/FilletCommand.h
     commands/FilletCommand.cpp
     commands/FindCommand.h

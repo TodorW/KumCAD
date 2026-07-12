@@ -107,6 +107,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     // Current-style names from the header, applied after the tables exist.
     std::string pendingTextStyle;
     std::string pendingDimStyle;
+    bool haveGeo = false;
+    GeoLocation pendingGeo;
 
     // STYLE table entry being accumulated.
     TextStyle curTextStyle;
@@ -713,6 +715,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 if (v > 1e-9) fresh.setPointSize(v);
             } else if (g.code == 40 && curHeaderVar == "$KUMCAD_ANNOSCALE") {
                 fresh.setAnnotationScale(toDouble(g.value, 1.0));
+            } else if (curHeaderVar == "$KUMCAD_GEOLOCATION") {
+                haveGeo = true;
+                if (g.code == 10) pendingGeo.designPoint.x = toDouble(g.value);
+                else if (g.code == 20) pendingGeo.designPoint.y = toDouble(g.value);
+                else if (g.code == 40) pendingGeo.latitude = toDouble(g.value);
+                else if (g.code == 41) pendingGeo.longitude = toDouble(g.value);
+                else if (g.code == 50) pendingGeo.northRotation = toDouble(g.value) * M_PI / 180.0;
             }
             continue;
         }
@@ -972,6 +981,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
 
     if (!pendingTextStyle.empty()) fresh.setCurrentTextStyle(pendingTextStyle);
     if (!pendingDimStyle.empty()) fresh.setCurrentDimStyle(pendingDimStyle);
+    if (haveGeo) fresh.setGeoLocation(pendingGeo);
 
     document = std::move(fresh);
     return true;

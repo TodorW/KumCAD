@@ -395,6 +395,35 @@ TEST_CASE("DXF dynamic block linear parameter round-trips", "[dxf][block][dynami
     REQUIRE(loaded.entities().front()->type() == lcad::EntityType::Insert);
 }
 
+TEST_CASE("DXF geographic location round-trips", "[dxf][geo]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    lcad::GeoLocation geo;
+    geo.designPoint = lcad::Point2D(0, 0);
+    geo.latitude = 40.7128;
+    geo.longitude = -74.0060;
+    geo.northRotation = 0.1;
+    doc.setGeoLocation(geo);
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    REQUIRE(loaded.geoLocation().has_value());
+    REQUIRE(loaded.geoLocation()->latitude == Approx(40.7128));
+    REQUIRE(loaded.geoLocation()->longitude == Approx(-74.0060));
+    REQUIRE(loaded.geoLocation()->northRotation == Approx(0.1));
+
+    // A document with none set round-trips to none, not a spurious default.
+    lcad::Document plain;
+    TempDxfPath temp2;
+    REQUIRE(lcad::writeDxf(plain, temp2.path.string()));
+    lcad::Document loadedPlain;
+    REQUIRE(lcad::readDxf(loadedPlain, temp2.path.string()));
+    REQUIRE_FALSE(loadedPlain.geoLocation().has_value());
+}
+
 TEST_CASE("DXF image underlay round-trips", "[dxf][image]") {
     TempDxfPath temp;
 

@@ -396,6 +396,7 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         if (const auto& c2 = hatch.gradientColor2()) {
             writeGroup(out, 450, 1);
             writeGroup(out, 421, trueColor(*c2));
+            writeGroup(out, 470, gradientPresetName(hatch.gradientPreset())); // real DXF's gradient-name group
         }
         break;
     }

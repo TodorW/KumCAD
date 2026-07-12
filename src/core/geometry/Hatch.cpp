@@ -1,10 +1,38 @@
 #include "core/geometry/Hatch.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
 namespace lcad {
+
+const char* gradientPresetName(GradientPreset preset) {
+    switch (preset) {
+    case GradientPreset::Linear: return "LINEAR";
+    case GradientPreset::Cylinder: return "CYLINDER";
+    case GradientPreset::InvCylinder: return "INVCYLINDER";
+    case GradientPreset::Spherical: return "SPHERICAL";
+    case GradientPreset::InvSpherical: return "INVSPHERICAL";
+    case GradientPreset::Hemispherical: return "HEMISPHERICAL";
+    case GradientPreset::InvHemispherical: return "INVHEMISPHERICAL";
+    case GradientPreset::Curved: return "CURVED";
+    case GradientPreset::InvCurved: return "INVCURVED";
+    }
+    return "LINEAR";
+}
+
+std::optional<GradientPreset> gradientPresetFromName(const std::string& name) {
+    static const std::array<GradientPreset, 9> all{
+        GradientPreset::Linear,          GradientPreset::Cylinder,          GradientPreset::InvCylinder,
+        GradientPreset::Spherical,       GradientPreset::InvSpherical,      GradientPreset::Hemispherical,
+        GradientPreset::InvHemispherical, GradientPreset::Curved,            GradientPreset::InvCurved,
+    };
+    for (GradientPreset p : all) {
+        if (name == gradientPresetName(p)) return p;
+    }
+    return std::nullopt;
+}
 
 namespace {
 

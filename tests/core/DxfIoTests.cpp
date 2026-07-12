@@ -345,6 +345,7 @@ TEST_CASE("DXF gradient hatch round-trips", "[dxf][hatch][gradient]") {
     auto hatch = std::make_unique<lcad::HatchEntity>(doc.reserveEntityId(), doc.currentLayer(), tri);
     hatch->setColorOverride(lcad::Color{200, 50, 50});
     hatch->setGradientColor2(lcad::Color{50, 50, 200});
+    hatch->setGradientPreset(lcad::GradientPreset::InvHemispherical);
     doc.addEntity(std::move(hatch));
     REQUIRE(lcad::writeDxf(doc, temp.path.string()));
 
@@ -358,6 +359,7 @@ TEST_CASE("DXF gradient hatch round-trips", "[dxf][hatch][gradient]") {
     REQUIRE(loadedHatch->gradientColor2()->g == 50);
     REQUIRE(loadedHatch->gradientColor2()->b == 200);
     REQUIRE(loadedHatch->colorOverride()->r == 200);
+    REQUIRE(loadedHatch->gradientPreset() == lcad::GradientPreset::InvHemispherical);
 }
 
 TEST_CASE("DXF dynamic block linear parameter round-trips", "[dxf][block][dynamic]") {

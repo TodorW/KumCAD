@@ -24,6 +24,7 @@
 #include <QFont>
 #include <QFontMetricsF>
 #include <QLinearGradient>
+#include <QRadialGradient>
 #include <QPainter>
 #include <QPixmap>
 #include <QPainterPath>
@@ -84,6 +85,62 @@ double annotationMultiplier(const lcad::Document* document, const std::string& s
     if (!document) return 1.0;
     const lcad::TextStyle* style = document->findTextStyle(styleName);
     return (style && style->annotative) ? document->annotationScale() : 1.0;
+}
+
+// Builds the QBrush for a GRADIENT hatch. Approximates AutoCAD's nine named
+// presets with Qt's linear/radial gradients -- not pixel-identical to
+// AutoCAD's proprietary curves, but each preset reads as visually distinct:
+// LINEAR is a plain two-stop sweep; CYLINDER/CURVED are three-stop sweeps
+// with a highlight band (CURVED's band sits off-center instead of at the
+// midpoint); SPHERICAL/HEMISPHERICAL are radial, HEMISPHERICAL's center
+// shifted toward one edge along the gradient angle instead of the boundary's
+// centroid. Every INV* variant just swaps the two colors' stop order.
+QBrush gradientBrush(lcad::GradientPreset preset, const QColor& color1, const QColor& color2,
+                     const WorldToScreen& toScreen, double scale, const lcad::BoundingBox& box, double angleRadians) {
+    const lcad::Point2D mid((box.min.x + box.max.x) / 2.0, (box.min.y + box.max.y) / 2.0);
+    const double halfSpan = 0.5 * lcad::Point2D(box.max.x - box.min.x, box.max.y - box.min.y).length();
+    const lcad::Point2D dir(std::cos(angleRadians), std::sin(angleRadians));
+
+    const bool inverted = preset == lcad::GradientPreset::InvCylinder ||
+                          preset == lcad::GradientPreset::InvSpherical ||
+                          preset == lcad::GradientPreset::InvHemispherical ||
+                          preset == lcad::GradientPreset::InvCurved;
+    const QColor& edge = inverted ? color2 : color1;
+    const QColor& highlight = inverted ? color1 : color2;
+
+    switch (preset) {
+    case lcad::GradientPreset::Cylinder:
+    case lcad::GradientPreset::InvCylinder:
+    case lcad::GradientPreset::Curved:
+    case lcad::GradientPreset::InvCurved: {
+        const bool curved = preset == lcad::GradientPreset::Curved || preset == lcad::GradientPreset::InvCurved;
+        const double highlightPos = curved ? 0.3 : 0.5; // curved's band sits off-center
+        QLinearGradient gradient(toScreen(mid - dir * halfSpan), toScreen(mid + dir * halfSpan));
+        gradient.setColorAt(0.0, edge);
+        gradient.setColorAt(highlightPos, highlight);
+        gradient.setColorAt(1.0, edge);
+        return QBrush(gradient);
+    }
+    case lcad::GradientPreset::Spherical:
+    case lcad::GradientPreset::InvSpherical:
+    case lcad::GradientPreset::Hemispherical:
+    case lcad::GradientPreset::InvHemispherical: {
+        const bool hemi =
+            preset == lcad::GradientPreset::Hemispherical || preset == lcad::GradientPreset::InvHemispherical;
+        const lcad::Point2D center = hemi ? mid - dir * (halfSpan * 0.5) : mid;
+        QRadialGradient gradient(toScreen(center), std::max(1.0, halfSpan * scale));
+        gradient.setColorAt(0.0, highlight);
+        gradient.setColorAt(1.0, edge);
+        return QBrush(gradient);
+    }
+    case lcad::GradientPreset::Linear:
+    default: {
+        QLinearGradient gradient(toScreen(mid - dir * halfSpan), toScreen(mid + dir * halfSpan));
+        gradient.setColorAt(0.0, color1);
+        gradient.setColorAt(1.0, color2);
+        return QBrush(gradient);
+    }
+    }
 }
 
 } // namespace
@@ -404,18 +461,9 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
                 poly << toScreen(v);
                 box.expand(v);
             }
-            // A linear gradient along patternAngle, spanning the boundary's
-            // own extent so it reads the same regardless of drawing scale.
-            const lcad::Point2D mid((box.min.x + box.max.x) / 2.0, (box.min.y + box.max.y) / 2.0);
-            const double halfSpan = 0.5 * lcad::Point2D(box.max.x - box.min.x, box.max.y - box.min.y).length();
-            const lcad::Point2D dir(std::cos(hatch.patternAngle()), std::sin(hatch.patternAngle()));
-            const QPointF p1 = toScreen(mid - dir * halfSpan);
-            const QPointF p2 = toScreen(mid + dir * halfSpan);
-            QLinearGradient gradient(p1, p2);
             const lcad::Color& c2 = *hatch.gradientColor2();
-            gradient.setColorAt(0.0, color);
-            gradient.setColorAt(1.0, QColor(c2.r, c2.g, c2.b));
-            painter.setBrush(gradient);
+            painter.setBrush(gradientBrush(hatch.gradientPreset(), color, QColor(c2.r, c2.g, c2.b), toScreen, scale,
+                                           box, hatch.patternAngle()));
             painter.drawPolygon(poly);
             painter.setBrush(Qt::NoBrush);
         } else if (hatch.pattern() == lcad::HatchPattern::Solid) {

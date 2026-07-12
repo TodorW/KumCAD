@@ -324,6 +324,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double hatchAngleDeg = 0.0;
     double hatchScale = 1.0;
     std::optional<Color> hatchGradientColor2; // HATCH group 421 (simplified GRADIENT marker)
+    std::string hatchGradientPresetName;      // HATCH group 470
     std::string insertName;
     double insertScale = 1.0;
     Point2D vpViewCenter; // VIEWPORT group 12/22
@@ -457,7 +458,10 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             }
             auto hatch = std::make_unique<HatchEntity>(id, layerId, polyVerts, pattern, hatchScale,
                                                        hatchAngleDeg * M_PI / 180.0);
-            if (hatchGradientColor2) hatch->setGradientColor2(*hatchGradientColor2);
+            if (hatchGradientColor2) {
+                hatch->setGradientColor2(*hatchGradientColor2);
+                if (const auto preset = gradientPresetFromName(hatchGradientPresetName)) hatch->setGradientPreset(*preset);
+            }
             made = std::move(hatch);
         } else if (curEntityType == "VIEWPORT") {
             // Only paper-space viewports (from *Paper_Space blocks) become
@@ -577,6 +581,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         hatchAngleDeg = 0.0;
         hatchScale = 1.0;
         hatchGradientColor2.reset();
+        hatchGradientPresetName.clear();
         insertName.clear();
         insertScale = 1.0;
         splineDegree = 3;
@@ -993,6 +998,9 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             break;
         case 421:
             if (curEntityType == "HATCH") hatchGradientColor2 = colorFromTrueColor(toInt(g.value));
+            break;
+        case 470:
+            if (curEntityType == "HATCH") hatchGradientPresetName = g.value;
             break;
         case 70:
             // Closed flag (bit 0) on the polyline header; a VERTEX's own 70

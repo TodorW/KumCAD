@@ -319,11 +319,16 @@ void PropertiesPanel::refresh() {
     }
     case lcad::EntityType::Hatch: {
         const auto* hatch = static_cast<const lcad::HatchEntity*>(e);
-        m_summaryLabel->setText(QStringLiteral("Hatch"));
-        addRow(QStringLiteral("Pattern:"), QLatin1String(lcad::hatchPatternName(hatch->pattern())));
-        if (hatch->pattern() != lcad::HatchPattern::Solid) {
-            addRow(QStringLiteral("Scale:"), formatNumber(hatch->patternScale()));
+        m_summaryLabel->setText(hatch->isGradient() ? QStringLiteral("Gradient") : QStringLiteral("Hatch"));
+        if (hatch->isGradient()) {
+            addRow(QStringLiteral("Gradient:"), QLatin1String(lcad::gradientPresetName(hatch->gradientPreset())));
             addRow(QStringLiteral("Angle:"), formatDegrees(hatch->patternAngle()));
+        } else {
+            addRow(QStringLiteral("Pattern:"), QLatin1String(lcad::hatchPatternName(hatch->pattern())));
+            if (hatch->pattern() != lcad::HatchPattern::Solid) {
+                addRow(QStringLiteral("Scale:"), formatNumber(hatch->patternScale()));
+                addRow(QStringLiteral("Angle:"), formatDegrees(hatch->patternAngle()));
+            }
         }
         addRow(QStringLiteral("Vertices:"), QString::number(hatch->vertices().size()));
         break;

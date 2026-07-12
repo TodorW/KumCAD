@@ -5,9 +5,27 @@
 #include "core/geometry/HatchPattern.h"
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace lcad {
+
+// AutoCAD's nine named gradient shapes (DXF group 470's gradient_name).
+// Rendering (EntityPainter) approximates each with Qt's linear/radial
+// gradients rather than reproducing AutoCAD's exact proprietary curves.
+enum class GradientPreset {
+    Linear,
+    Cylinder,
+    InvCylinder,
+    Spherical,
+    InvSpherical,
+    Hemispherical,
+    InvHemispherical,
+    Curved,
+    InvCurved,
+};
+const char* gradientPresetName(GradientPreset preset);
+std::optional<GradientPreset> gradientPresetFromName(const std::string& name);
 
 // Closed polygon region filled solid or with a line-family pattern (the
 // AutoCAD HATCH). Boundary vertices are implicitly closed (last connects to
@@ -29,13 +47,18 @@ public:
     double patternScale() const { return m_patternScale; }
     double patternAngle() const { return m_patternAngle; } // radians, added to each family's own angle
 
-    // GRADIENT fill (AutoCAD's simplified two-color linear gradient): set
-    // means the boundary fills with a gradient from the entity's resolved
-    // color (colorOverride, or its layer's) to gradientColor2, angled by
-    // patternAngle, instead of a flat SOLID fill.
+    // GRADIENT fill: set means the boundary fills with a gradient from the
+    // entity's resolved color (colorOverride, or its layer's) to
+    // gradientColor2, shaped by gradientPreset and angled by patternAngle,
+    // instead of a flat SOLID fill. One-color gradients (AutoCAD lets you
+    // pick a single color plus a tint/shade slider) aren't a distinct mode
+    // here -- GradientCommand just computes gradientColor2 from the tint
+    // fraction up front, so this entity always ends up with two real colors.
     const std::optional<Color>& gradientColor2() const { return m_gradientColor2; }
     void setGradientColor2(std::optional<Color> color) { m_gradientColor2 = color; }
     bool isGradient() const { return m_gradientColor2.has_value(); }
+    GradientPreset gradientPreset() const { return m_gradientPreset; }
+    void setGradientPreset(GradientPreset preset) { m_gradientPreset = preset; }
 
     // The pattern's line work clipped to the boundary (even-odd), as world
     // segments -- what the renderer draws for non-solid patterns. Capped to a
@@ -63,6 +86,7 @@ private:
     double m_patternScale = 1.0;
     double m_patternAngle = 0.0;
     std::optional<Color> m_gradientColor2;
+    GradientPreset m_gradientPreset = GradientPreset::Linear;
 };
 
 } // namespace lcad

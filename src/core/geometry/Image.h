@@ -11,18 +11,25 @@ namespace lcad {
 // placement; loading and drawing the actual pixels is a Qt-side concern
 // (EntityPainter). A single grip (the insertion point) moves the whole
 // image, matching InsertEntity -- there's no per-corner resize grip.
+//
+// Also doubles as AutoCAD's PDFATTACH (simplified): when path ends in
+// ".pdf", EntityPainter rasterizes pdfPage() of it via Poppler instead of
+// loading it as a raster file -- no vector rendering, no layer visibility
+// within the PDF, first matching page only. pdfPage is meaningless (and
+// left 0) for a non-PDF path.
 class ImageEntity : public Entity {
 public:
     ImageEntity(EntityId id, LayerId layer, std::string path, Point2D position, double width, double height,
-               double rotationRadians = 0.0)
+               double rotationRadians = 0.0, int pdfPage = 0)
         : Entity(id, layer), m_path(std::move(path)), m_position(position), m_width(width), m_height(height),
-          m_rotation(rotationRadians) {}
+          m_rotation(rotationRadians), m_pdfPage(pdfPage) {}
 
     const std::string& path() const { return m_path; }
     const Point2D& position() const { return m_position; }
     double width() const { return m_width; }
     double height() const { return m_height; }
     double rotation() const { return m_rotation; }
+    int pdfPage() const { return m_pdfPage; }
 
     EntityType type() const override { return EntityType::Image; }
     BoundingBox boundingBox() const override;
@@ -44,6 +51,7 @@ private:
     double m_width;
     double m_height;
     double m_rotation;
+    int m_pdfPage;
 };
 
 } // namespace lcad

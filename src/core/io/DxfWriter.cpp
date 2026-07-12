@@ -306,6 +306,7 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         writeGroup(out, 40, image.width());
         writeGroup(out, 41, image.height());
         writeGroup(out, 50, image.rotation() * 180.0 / M_PI);
+        if (image.pdfPage() != 0) writeGroup(out, 71, image.pdfPage()); // simplified PDFATTACH page index
         break;
     }
     case EntityType::PointCloud: {

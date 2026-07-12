@@ -542,6 +542,25 @@ TEST_CASE("DXF image underlay round-trips", "[dxf][image]") {
     REQUIRE(image->width() == Approx(40.0));
     REQUIRE(image->height() == Approx(30.0));
     REQUIRE(image->rotation() == Approx(M_PI / 6));
+    REQUIRE(image->pdfPage() == 0); // plain raster image: no page concept
+}
+
+TEST_CASE("DXF round-trips a PDF underlay's page index", "[dxf][image][pdf]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addEntity(std::make_unique<lcad::ImageEntity>(doc.reserveEntityId(), doc.currentLayer(), "/tmp/plans.pdf",
+                                                       lcad::Point2D(0, 0), 20.0, 15.0, 0.0, 2));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const auto entities = loaded.entities();
+    REQUIRE(entities.size() == 1);
+    const auto* image = static_cast<const lcad::ImageEntity*>(entities[0]);
+    REQUIRE(image->path() == "/tmp/plans.pdf");
+    REQUIRE(image->pdfPage() == 2);
 }
 
 TEST_CASE("DXF block definitions and inserts round-trip", "[dxf][block]") {

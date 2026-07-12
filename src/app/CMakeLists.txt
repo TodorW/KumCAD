@@ -162,3 +162,20 @@ add_executable(kumcad
 
 target_include_directories(kumcad PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(kumcad PRIVATE lcad_core Qt6::Widgets Qt6::OpenGLWidgets Qt6::PrintSupport)
+
+# Optional PDF underlay (PDFATTACH) via Poppler's Qt6 binding.
+option(LCAD_ENABLE_PDF "Enable PDF underlay rasterization via Poppler-Qt6 if available" ON)
+if(LCAD_ENABLE_PDF)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(POPPLER_QT6 QUIET poppler-qt6)
+    endif()
+    if(POPPLER_QT6_FOUND)
+        target_include_directories(kumcad PRIVATE ${POPPLER_QT6_INCLUDE_DIRS})
+        target_link_libraries(kumcad PRIVATE ${POPPLER_QT6_LIBRARIES})
+        target_compile_definitions(kumcad PRIVATE LCAD_HAS_PDF)
+        message(STATUS "PDF underlay enabled (Poppler-Qt6)")
+    else()
+        message(STATUS "Poppler-Qt6 not found; building without PDF underlay support")
+    endif()
+endif()

@@ -360,6 +360,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double imageWidth = 0.0;         // IMAGE group 40
     double imageHeight = 0.0;        // IMAGE group 41
     double imageRotationDeg = 0.0;   // IMAGE group 50
+    int imagePdfPage = 0;            // IMAGE group 71 (only meaningful for a .pdf path)
     double mleaderArrowSize = 1.25;  // MULTILEADER group 40
     std::vector<Point2D> mleaderPoints; // flat, split into legs via mleaderLegSizes
     std::vector<int> mleaderLegSizes;   // one entry per leg, in order (group 70)
@@ -518,7 +519,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             made = std::make_unique<PointCloudEntity>(id, layerId, pointCloudPath, readPointCloudFile(pointCloudPath));
         } else if (curEntityType == "IMAGE" && !imagePath.empty() && imageWidth > 1e-9 && imageHeight > 1e-9) {
             made = std::make_unique<ImageEntity>(id, layerId, imagePath, p10, imageWidth, imageHeight,
-                                                 imageRotationDeg * M_PI / 180.0);
+                                                 imageRotationDeg * M_PI / 180.0, imagePdfPage);
         } else if (curEntityType == "MULTILEADER" && !mleaderLegSizes.empty()) {
             std::vector<std::vector<Point2D>> legs;
             std::size_t idx = 0;
@@ -615,6 +616,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         imageWidth = 0.0;
         imageHeight = 0.0;
         imageRotationDeg = 0.0;
+        imagePdfPage = 0;
         mleaderArrowSize = 1.25;
         mleaderPoints.clear();
         mleaderLegSizes.clear();
@@ -1053,6 +1055,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         case 71:
             if (curEntityType == "SPLINE") splineDegree = std::max(1, toInt(g.value, 3));
             else if (curEntityType == "MTEXT") mtextAttachment = toInt(g.value, 1);
+            else if (curEntityType == "IMAGE") imagePdfPage = toInt(g.value);
             break;
         case 93:
             if (curEntityType == "HATCH") hatchVertsExpected = toInt(g.value);

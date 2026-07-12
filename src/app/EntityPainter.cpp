@@ -34,6 +34,10 @@
 #include <cmath>
 #include <unordered_map>
 
+#ifdef LCAD_HAS_PDF
+#include <poppler-qt6.h>
+#endif
+
 namespace EntityPainter {
 
 namespace {
@@ -418,14 +422,29 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
     }
     case lcad::EntityType::Image: {
         const auto& image = static_cast<const lcad::ImageEntity&>(entity);
-        // Process-wide pixmap cache keyed by path: entities repaint every
-        // frame, loading from disk each time would be far too slow.
+        // Process-wide pixmap cache keyed by "path#page": entities repaint
+        // every frame, loading/rasterizing from disk each time would be far
+        // too slow. The page suffix keeps different pages of the same PDF
+        // (and plain raster images, whose page is always 0) from colliding.
         static std::unordered_map<std::string, QPixmap> cache;
-        auto it = cache.find(image.path());
+        const std::string cacheKey = image.path() + "#" + std::to_string(image.pdfPage());
+        auto it = cache.find(cacheKey);
         if (it == cache.end()) {
             QPixmap pixmap;
-            pixmap.load(QString::fromStdString(image.path()));
-            it = cache.emplace(image.path(), std::move(pixmap)).first;
+            const QString path = QString::fromStdString(image.path());
+            if (path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+#ifdef LCAD_HAS_PDF
+                if (const auto doc = Poppler::Document::load(path)) {
+                    if (const auto page = doc->page(image.pdfPage())) {
+                        // 150dpi is enough detail for an underlay traced over at typical zoom.
+                        pixmap = QPixmap::fromImage(page->renderToImage(150.0, 150.0));
+                    }
+                }
+#endif
+            } else {
+                pixmap.load(path);
+            }
+            it = cache.emplace(cacheKey, std::move(pixmap)).first;
         }
         const QPixmap& pixmap = it->second;
 

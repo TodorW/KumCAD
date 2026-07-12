@@ -7,6 +7,7 @@
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
@@ -103,6 +104,15 @@ struct DwgImport {
             free(pts);
             const auto* pl = obj->tio.entity->tio.POLYLINE_2D;
             made = std::make_unique<PolylineEntity>(id, layer, std::move(verts), (pl->flag & 1) != 0);
+            break;
+        }
+        case DWG_TYPE_LEADER: {
+            const auto* leader = obj->tio.entity->tio.LEADER;
+            if (leader->num_points < 2) break;
+            std::vector<Point2D> pts;
+            pts.reserve(leader->num_points);
+            for (BITCODE_BL i = 0; i < leader->num_points; ++i) pts.emplace_back(leader->points[i].x, leader->points[i].y);
+            made = std::make_unique<LeaderEntity>(id, layer, std::move(pts), doc.dimStyle().arrowSize);
             break;
         }
         case DWG_TYPE_ELLIPSE: {

@@ -1,8 +1,11 @@
 #include "core/document/Document.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 #include "core/io/DwgReader.h"
 #include "core/io/DwgWriter.h"
@@ -88,4 +91,56 @@ TEST_CASE("DWG write/read round-trips the core entity set", "[dwg]") {
     REQUIRE(text);
     REQUIRE(text->text() == "dwg out");
     REQUIRE(text->height() == Approx(2.5));
+}
+
+TEST_CASE("DWG export covers leaders, hatch boundaries, and table grids", "[dwg]") {
+    if (!lcad::dwgWriteSupportAvailable()) {
+        SUCCEED("built without LibreDWG; DWG export not available");
+        return;
+    }
+
+    TempDwgPath temp;
+    lcad::Document doc;
+
+    std::vector<lcad::Point2D> leaderPts{{0, 0}, {5, 5}, {10, 5}};
+    doc.addEntity(std::make_unique<lcad::LeaderEntity>(doc.reserveEntityId(), doc.currentLayer(), leaderPts, 1.25));
+
+    std::vector<lcad::Point2D> tri{{0, 0}, {10, 0}, {5, 8}};
+    doc.addEntity(std::make_unique<lcad::HatchEntity>(doc.reserveEntityId(), doc.currentLayer(), tri));
+
+    std::vector<double> rowHeights{1.0, 1.0};
+    std::vector<double> colWidths{2.0, 2.0};
+    std::vector<std::string> cells{"A1", "B1", "", "B2"};
+    doc.addEntity(std::make_unique<lcad::TableEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(20, 20),
+                                                       rowHeights, colWidths, cells, 1.0));
+
+    std::string error;
+    int skipped = 0;
+    REQUIRE(lcad::writeDwg(doc, temp.path.string(), &error, &skipped));
+    REQUIRE(skipped == 0);
+
+    lcad::Document loaded;
+    REQUIRE(lcad::readDwg(loaded, temp.path.string(), &error));
+    const auto entities = loaded.entities();
+
+    const auto* leader = static_cast<const lcad::LeaderEntity*>(findByType(entities, lcad::EntityType::Leader));
+    REQUIRE(leader);
+    REQUIRE(leader->points().size() == 3);
+    REQUIRE(leader->points()[2].x == Approx(10.0));
+
+    int closedTriangleCount = 0;
+    int gridLineCount = 0;
+    int textCount = 0;
+    for (const lcad::Entity* e : entities) {
+        if (e->type() == lcad::EntityType::Polyline) {
+            const auto* p = static_cast<const lcad::PolylineEntity*>(e);
+            if (p->closed() && p->vertices().size() == 3) ++closedTriangleCount;
+            if (!p->closed() && p->vertices().size() == 2) ++gridLineCount;
+        } else if (e->type() == lcad::EntityType::Text) {
+            ++textCount;
+        }
+    }
+    REQUIRE(closedTriangleCount >= 1);  // the exploded hatch boundary
+    REQUIRE(gridLineCount >= 6);        // table: 3 horizontal + 3 vertical grid lines
+    REQUIRE(textCount == 3);            // "A1", "B1", "B2" (the empty cell is skipped)
 }

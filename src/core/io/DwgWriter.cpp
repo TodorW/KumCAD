@@ -8,11 +8,15 @@
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Ellipse.h"
+#include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
+#include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 #include "core/io/DxfColors.h"
 
@@ -217,8 +221,91 @@ struct DwgExport {
                         e);
             return true;
         }
+        case EntityType::Leader: {
+            const auto& leader = static_cast<const LeaderEntity&>(e);
+            if (leader.points().size() < 2) return false;
+            std::vector<dwg_point_3d> pts;
+            pts.reserve(leader.points().size());
+            for (const Point2D& p : leader.points()) pts.push_back(pt3(p));
+            // Experimental API (LibreDWG's own annotation, not ours); the
+            // annotation MTEXT is a separate Document entity already
+            // written via the MText case above, so no association is passed.
+            applyCommon(dwg_add_LEADER(blkhdr, static_cast<unsigned>(pts.size()), pts.data(), nullptr, 0), e);
+            return true;
+        }
+        case EntityType::MLeader: {
+            // No dedicated MULTILEADER add API; each leg goes out as its own
+            // LEADER converging on the shared landing point.
+            const auto& mleader = static_cast<const MLeaderEntity&>(e);
+            bool any = false;
+            for (const auto& leg : mleader.legs()) {
+                if (leg.empty()) continue;
+                std::vector<dwg_point_3d> pts;
+                pts.reserve(leg.size() + 1);
+                for (const Point2D& p : leg) pts.push_back(pt3(p));
+                pts.push_back(pt3(mleader.landing()));
+                applyCommon(dwg_add_LEADER(blkhdr, static_cast<unsigned>(pts.size()), pts.data(), nullptr, 0), e);
+                any = true;
+            }
+            return any;
+        }
+        case EntityType::Hatch: {
+            // Boundary outline only, no fill pattern: HATCH's add API wants
+            // its boundary as references to real boundary entities (an
+            // associative hatch), which risks leaving a stray visible
+            // polyline behind it; an outline reads closer to the original
+            // than silently dropping the entity.
+            const auto& hatch = static_cast<const HatchEntity&>(e);
+            if (hatch.vertices().size() < 3) return false;
+            std::vector<dwg_point_2d> pts;
+            pts.reserve(hatch.vertices().size());
+            for (const Point2D& v : hatch.vertices()) pts.push_back(dwg_point_2d{v.x, v.y});
+            Dwg_Entity_LWPOLYLINE* made = dwg_add_LWPOLYLINE(blkhdr, static_cast<int>(pts.size()), pts.data());
+            if (made) made->flag |= 512; // closed
+            applyCommon(made, e);
+            return true;
+        }
+        case EntityType::Table: {
+            // No TABLE add API: exploded into grid lines (LWPOLYLINE per
+            // row/column boundary) plus one TEXT per non-empty cell, the
+            // same degrade-to-visible-geometry approach as bulged polylines.
+            const auto& table = static_cast<const TableEntity&>(e);
+            const Point2D& pos = table.position();
+            const double totalW = table.totalWidth();
+            const double totalH = table.totalHeight();
+            const auto hLine = [&](double y) {
+                std::vector<dwg_point_2d> pts{{pos.x, y}, {pos.x + totalW, y}};
+                applyCommon(dwg_add_LWPOLYLINE(blkhdr, 2, pts.data()), e);
+            };
+            const auto vLine = [&](double x) {
+                std::vector<dwg_point_2d> pts{{x, pos.y}, {x, pos.y - totalH}};
+                applyCommon(dwg_add_LWPOLYLINE(blkhdr, 2, pts.data()), e);
+            };
+            double y = pos.y;
+            hLine(y);
+            for (double h : table.rowHeights()) {
+                y -= h;
+                hLine(y);
+            }
+            double x = pos.x;
+            vLine(x);
+            for (double w : table.colWidths()) {
+                x += w;
+                vLine(x);
+            }
+            for (int r = 0; r < table.rows(); ++r) {
+                for (int c = 0; c < table.cols(); ++c) {
+                    const std::string& text = table.cellText(r, c);
+                    if (text.empty()) continue;
+                    const BoundingBox cell = table.cellRect(r, c);
+                    const dwg_point_3d p = pt3(Point2D(cell.min.x + 0.2 * table.textHeight(), cell.max.y - 0.8 * table.textHeight()));
+                    applyCommon(dwg_add_TEXT(blkhdr, text.c_str(), &p, table.textHeight()), e);
+                }
+            }
+            return true;
+        }
         default:
-            return false; // hatches, leaders, attdefs: not expressible via the add API yet
+            return false; // attdefs: not expressible via the add API yet
         }
     }
 };
@@ -266,10 +353,42 @@ bool writeDwg(const Document& document, const std::string& path, std::string* er
     for (const Entity* e : document.entities()) {
         if (!exporter.convert(*e, exporter.mspace)) ++exporter.skipped;
     }
-    // Paper space isn't exported; count its entities as skipped so the UI
-    // can be honest about it.
-    for (std::size_t i = 0; i < document.layouts().size(); ++i) {
-        exporter.skipped += static_cast<int>(document.layouts()[i].entityIds.size());
+
+    // Only the first layout's paper space is exported: dwg_add_Document
+    // sets up exactly one default paper-space block, and LibreDWG's add API
+    // (as of this writing) has no way to create additional ones. Later
+    // layouts' entities are counted as skipped so the UI stays honest.
+    if (!document.layouts().empty()) {
+        if (Dwg_Object* pspaceObj = dwg_paper_space_object(&dwg)) {
+            Dwg_Object_BLOCK_HEADER* pspace = pspaceObj->tio.object->tio.BLOCK_HEADER;
+            const Layout& layout = document.layouts().front();
+            for (const Viewport& vp : layout.viewports) {
+                if (vp.viewScale < 1e-12) continue;
+                Dwg_Entity_VIEWPORT* made = dwg_add_VIEWPORT(pspace, "*Active");
+                if (made) {
+                    made->center.x = vp.paperCenter.x;
+                    made->center.y = vp.paperCenter.y;
+                    made->center.z = 0.0;
+                    made->width = vp.paperWidth;
+                    made->height = vp.paperHeight;
+                    made->VIEWCTR.x = vp.modelCenter.x;
+                    made->VIEWCTR.y = vp.modelCenter.y;
+                    made->VIEWSIZE = vp.paperHeight / vp.viewScale;
+                    made->on_off = 1;
+                } else {
+                    ++exporter.skipped;
+                }
+            }
+            for (EntityId id : layout.entityIds) {
+                const Entity* e = document.findEntity(id);
+                if (!e || !exporter.convert(*e, pspace)) ++exporter.skipped;
+            }
+        } else {
+            for (const Layout& layout : document.layouts()) exporter.skipped += static_cast<int>(layout.entityIds.size());
+        }
+        for (std::size_t i = 1; i < document.layouts().size(); ++i) {
+            exporter.skipped += static_cast<int>(document.layouts()[i].entityIds.size());
+        }
     }
 
     const int error = dwg_write_file(path.c_str(), &dwg);

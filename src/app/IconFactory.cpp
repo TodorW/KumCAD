@@ -280,4 +280,30 @@ QIcon eraseIcon() {
     });
 }
 
+QIcon appIcon() {
+    constexpr int size = 64;
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(45, 110, 200));
+    painter.drawRoundedRect(QRectF(2, 2, size - 4, size - 4), 12, 12);
+
+    // A compass/drafting motif: a circle (the drawn arc) crossed by a
+    // straightedge, evoking CAD without trying to be a literal logo.
+    QPen pen(Qt::white, 4.0);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(QPointF(size / 2.0, size / 2.0 + 2), 15.0, 15.0);
+    painter.drawLine(QPointF(14, 16), QPointF(50, 16));
+    dot(painter, QPointF(size / 2.0, size / 2.0 + 2));
+
+    return QIcon(pixmap);
+}
+
 } // namespace IconFactory

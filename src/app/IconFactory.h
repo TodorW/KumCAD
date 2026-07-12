@@ -28,4 +28,10 @@ QIcon hatchIcon();
 QIcon blockIcon();
 QIcon eraseIcon();
 
+// The application/window icon (taskbar, alt-tab, title bar) -- unlike the
+// tool icons above, this one paints its own colored background rather than
+// relying on transparency over a dark canvas, since a host desktop's
+// taskbar isn't guaranteed to be dark.
+QIcon appIcon();
+
 } // namespace IconFactory

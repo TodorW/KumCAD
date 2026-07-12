@@ -292,33 +292,38 @@ void MainWindow::setupMenusAndToolbar() {
 
     toolbar->addSeparator();
 
-    auto addCommandAction = [this, toolbar](const QIcon& icon, const QString& label, const QString& command) {
+    // The tooltip's "(alias)" hint is the same short form CommandDispatcher
+    // itself accepts at the command line, so hovering a toolbar icon doubles
+    // as discovering its typed shortcut.
+    auto addCommandAction = [this, toolbar](const QIcon& icon, const QString& label, const QString& command,
+                                            const QString& alias = QString()) {
         QAction* action = toolbar->addAction(icon, label);
+        action->setToolTip(alias.isEmpty() ? label : QStringLiteral("%1 (%2)").arg(label, alias));
         connect(action, &QAction::triggered, this, [this, command]() { m_dispatcher->handleCommandText(command); });
     };
-    addCommandAction(IconFactory::lineIcon(), QStringLiteral("Line"), QStringLiteral("LINE"));
-    addCommandAction(IconFactory::circleIcon(), QStringLiteral("Circle"), QStringLiteral("CIRCLE"));
-    addCommandAction(IconFactory::arcIcon(), QStringLiteral("Arc"), QStringLiteral("ARC"));
-    addCommandAction(IconFactory::polylineIcon(), QStringLiteral("Polyline"), QStringLiteral("PLINE"));
-    addCommandAction(IconFactory::ellipseIcon(), QStringLiteral("Ellipse"), QStringLiteral("ELLIPSE"));
-    addCommandAction(IconFactory::rectangleIcon(), QStringLiteral("Rectangle"), QStringLiteral("RECTANG"));
-    addCommandAction(IconFactory::textIcon(), QStringLiteral("Text"), QStringLiteral("TEXT"));
+    addCommandAction(IconFactory::lineIcon(), QStringLiteral("Line"), QStringLiteral("LINE"), QStringLiteral("L"));
+    addCommandAction(IconFactory::circleIcon(), QStringLiteral("Circle"), QStringLiteral("CIRCLE"), QStringLiteral("C"));
+    addCommandAction(IconFactory::arcIcon(), QStringLiteral("Arc"), QStringLiteral("ARC"), QStringLiteral("A"));
+    addCommandAction(IconFactory::polylineIcon(), QStringLiteral("Polyline"), QStringLiteral("PLINE"), QStringLiteral("PL"));
+    addCommandAction(IconFactory::ellipseIcon(), QStringLiteral("Ellipse"), QStringLiteral("ELLIPSE"), QStringLiteral("EL"));
+    addCommandAction(IconFactory::rectangleIcon(), QStringLiteral("Rectangle"), QStringLiteral("RECTANG"), QStringLiteral("REC"));
+    addCommandAction(IconFactory::textIcon(), QStringLiteral("Text"), QStringLiteral("TEXT"), QStringLiteral("DT"));
 
     toolbar->addSeparator();
-    addCommandAction(IconFactory::moveIcon(), QStringLiteral("Move"), QStringLiteral("MOVE"));
-    addCommandAction(IconFactory::copyIcon(), QStringLiteral("Copy"), QStringLiteral("COPY"));
-    addCommandAction(IconFactory::rotateIcon(), QStringLiteral("Rotate"), QStringLiteral("ROTATE"));
-    addCommandAction(IconFactory::scaleIcon(), QStringLiteral("Scale"), QStringLiteral("SCALE"));
-    addCommandAction(IconFactory::mirrorIcon(), QStringLiteral("Mirror"), QStringLiteral("MIRROR"));
-    addCommandAction(IconFactory::offsetIcon(), QStringLiteral("Offset"), QStringLiteral("OFFSET"));
-    addCommandAction(IconFactory::trimIcon(), QStringLiteral("Trim"), QStringLiteral("TRIM"));
-    addCommandAction(IconFactory::extendIcon(), QStringLiteral("Extend"), QStringLiteral("EXTEND"));
-    addCommandAction(IconFactory::filletIcon(), QStringLiteral("Fillet"), QStringLiteral("FILLET"));
+    addCommandAction(IconFactory::moveIcon(), QStringLiteral("Move"), QStringLiteral("MOVE"), QStringLiteral("M"));
+    addCommandAction(IconFactory::copyIcon(), QStringLiteral("Copy"), QStringLiteral("COPY"), QStringLiteral("CO"));
+    addCommandAction(IconFactory::rotateIcon(), QStringLiteral("Rotate"), QStringLiteral("ROTATE"), QStringLiteral("RO"));
+    addCommandAction(IconFactory::scaleIcon(), QStringLiteral("Scale"), QStringLiteral("SCALE"), QStringLiteral("SC"));
+    addCommandAction(IconFactory::mirrorIcon(), QStringLiteral("Mirror"), QStringLiteral("MIRROR"), QStringLiteral("MI"));
+    addCommandAction(IconFactory::offsetIcon(), QStringLiteral("Offset"), QStringLiteral("OFFSET"), QStringLiteral("O"));
+    addCommandAction(IconFactory::trimIcon(), QStringLiteral("Trim"), QStringLiteral("TRIM"), QStringLiteral("TR"));
+    addCommandAction(IconFactory::extendIcon(), QStringLiteral("Extend"), QStringLiteral("EXTEND"), QStringLiteral("EX"));
+    addCommandAction(IconFactory::filletIcon(), QStringLiteral("Fillet"), QStringLiteral("FILLET"), QStringLiteral("F"));
 
     toolbar->addSeparator();
-    addCommandAction(IconFactory::dimensionIcon(), QStringLiteral("Dimension"), QStringLiteral("DIMLINEAR"));
-    addCommandAction(IconFactory::hatchIcon(), QStringLiteral("Hatch"), QStringLiteral("HATCH"));
-    addCommandAction(IconFactory::blockIcon(), QStringLiteral("Block"), QStringLiteral("BLOCK"));
+    addCommandAction(IconFactory::dimensionIcon(), QStringLiteral("Dimension"), QStringLiteral("DIMLINEAR"), QStringLiteral("DLI"));
+    addCommandAction(IconFactory::hatchIcon(), QStringLiteral("Hatch"), QStringLiteral("HATCH"), QStringLiteral("H"));
+    addCommandAction(IconFactory::blockIcon(), QStringLiteral("Block"), QStringLiteral("BLOCK"), QStringLiteral("B"));
 
     toolbar->addSeparator();
     auto* eraseAction = toolbar->addAction(IconFactory::eraseIcon(), QStringLiteral("Erase"));

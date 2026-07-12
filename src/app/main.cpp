@@ -1,3 +1,4 @@
+#include "IconFactory.h"
 #include "MainWindow.h"
 
 #include <QApplication>
@@ -41,6 +42,7 @@ void applyDarkTheme(QApplication& app) {
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("KumCAD"));
+    app.setWindowIcon(IconFactory::appIcon());
     applyDarkTheme(app);
 
     MainWindow window;

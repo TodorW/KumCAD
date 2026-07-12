@@ -22,6 +22,8 @@ add_executable(kumcad
     LayerPanel.cpp
     LayerStatesDialog.h
     LayerStatesDialog.cpp
+    PlotStyleDialog.h
+    PlotStyleDialog.cpp
     PropertiesPanel.h
     PropertiesPanel.cpp
     ToolPalette.h

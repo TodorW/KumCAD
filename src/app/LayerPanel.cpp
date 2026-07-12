@@ -1,6 +1,7 @@
 #include "LayerPanel.h"
 
 #include "LayerStatesDialog.h"
+#include "PlotStyleDialog.h"
 
 #include <QAction>
 #include <QFont>
@@ -143,6 +144,19 @@ void LayerPanel::onContextMenuRequested(const QPoint& pos) {
         action->setChecked(layer->linetype == type);
         action->setData(static_cast<int>(type));
     }
+    QMenu* plotStyleMenu = menu.addMenu(QStringLiteral("Plot Style"));
+    QAction* noPlotStyleAction = plotStyleMenu->addAction(QStringLiteral("None (plot as displayed)"));
+    noPlotStyleAction->setCheckable(true);
+    noPlotStyleAction->setChecked(layer->plotStyle.empty());
+    for (const lcad::PlotStyle& style : m_document.plotStyles()) {
+        QAction* action = plotStyleMenu->addAction(QString::fromStdString(style.name));
+        action->setCheckable(true);
+        action->setChecked(layer->plotStyle == style.name);
+        action->setData(QString::fromStdString(style.name));
+    }
+    plotStyleMenu->addSeparator();
+    QAction* managePlotStylesAction = plotStyleMenu->addAction(QStringLiteral("Manage Plot Styles..."));
+
     QAction* chosen = menu.exec(m_list->viewport()->mapToGlobal(pos));
     if (chosen == toggleLockAction) {
         layer->locked = !layer->locked;
@@ -151,6 +165,15 @@ void LayerPanel::onContextMenuRequested(const QPoint& pos) {
     } else if (chosen && chosen->parent() == linetypeMenu) {
         layer->linetype = static_cast<lcad::LineType>(chosen->data().toInt());
         refresh();
+        emit layersChanged();
+    } else if (chosen == managePlotStylesAction) {
+        PlotStyleDialog dialog(m_document, this);
+        dialog.exec();
+    } else if (chosen == noPlotStyleAction) {
+        layer->plotStyle.clear();
+        emit layersChanged();
+    } else if (chosen && chosen->parent() == plotStyleMenu) {
+        layer->plotStyle = chosen->data().toString().toStdString();
         emit layersChanged();
     }
 }

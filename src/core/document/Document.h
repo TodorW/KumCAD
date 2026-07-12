@@ -5,6 +5,7 @@
 #include "core/document/Command.h"
 #include "core/document/Layer.h"
 #include "core/document/Layout.h"
+#include "core/document/PlotStyle.h"
 #include "core/geometry/Entity.h"
 
 #include <memory>
@@ -96,6 +97,19 @@ public:
     void saveLayerState(LayerState state);
     void applyLayerState(const LayerState& state);
     bool deleteLayerState(const std::string& name);
+
+    // Plot Style Table (see core/document/PlotStyle.h): named styles a
+    // layer can opt into (Layer::plotStyle) to change how it plots without
+    // changing how it displays. savePlotStyle stores/overwrites by name.
+    const std::vector<PlotStyle>& plotStyles() const { return m_plotStyles; }
+    PlotStyle* findPlotStyle(const std::string& name);
+    const PlotStyle* findPlotStyle(const std::string& name) const;
+    void savePlotStyle(PlotStyle style);
+    bool deletePlotStyle(const std::string& name);
+    // What entity e actually plots with: its layer's color/linetype/
+    // lineweight, then its own overrides, then (if the layer has a plot
+    // style assigned) that style's overrides on top.
+    PlotAppearance plotAppearance(const Entity& e) const;
 
     // Entities. addEntity/removeEntity are the low-level primitives that Commands
     // (see Commands.h) wrap to make every mutation undoable. New entities land
@@ -225,6 +239,7 @@ public:
 private:
     std::vector<Layer> m_layers;
     std::vector<LayerState> m_layerStates;
+    std::vector<PlotStyle> m_plotStyles;
     LayerId m_nextLayerId = 1;
     LayerId m_currentLayer = 0;
 

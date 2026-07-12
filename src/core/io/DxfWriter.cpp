@@ -548,6 +548,17 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
             writeGroup(out, 40, entry.lineweight);
         }
     }
+    for (const PlotStyle& style : document.plotStyles()) {
+        // Simplified plot style table: a repeatable $KUMCAD_PLOTSTYLE
+        // header pseudo-variable, group 1 name then whichever of
+        // color/lineweight/linetype the style actually overrides -- an
+        // omitted group means "not overridden", so no separate flags.
+        writeGroup(out, 9, "$KUMCAD_PLOTSTYLE");
+        writeGroup(out, 1, style.name);
+        if (style.color) writeGroup(out, 420, trueColor(*style.color));
+        if (style.lineweight) writeGroup(out, 40, *style.lineweight);
+        if (style.linetype) writeGroup(out, 6, lineTypeName(*style.linetype));
+    }
     writeGroup(out, 0, "ENDSEC");
 
     writeGroup(out, 0, "SECTION");
@@ -587,6 +598,11 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
         writeGroup(out, 420, trueColor(layer.color));
         writeGroup(out, 6, lineTypeName(layer.linetype));
         writeGroup(out, 370, static_cast<int>(std::lround(layer.lineweight * 100.0)));
+        // Real AutoCAD points group 390 at a plot-style-table-object handle
+        // in the OBJECTS section; this stores the plot style's name
+        // directly instead, the same "keep it in the drawing, not an
+        // extension dictionary" simplification as LAYERSTATE/DATALINK.
+        if (!layer.plotStyle.empty()) writeGroup(out, 1, layer.plotStyle);
     }
     writeGroup(out, 0, "ENDTAB");
     writeGroup(out, 0, "TABLE");

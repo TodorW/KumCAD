@@ -71,6 +71,57 @@ bool Document::deleteLayerState(const std::string& name) {
     return true;
 }
 
+PlotStyle* Document::findPlotStyle(const std::string& name) {
+    auto it = std::find_if(m_plotStyles.begin(), m_plotStyles.end(),
+                           [&name](const PlotStyle& s) { return s.name == name; });
+    return it != m_plotStyles.end() ? &(*it) : nullptr;
+}
+
+const PlotStyle* Document::findPlotStyle(const std::string& name) const {
+    auto it = std::find_if(m_plotStyles.begin(), m_plotStyles.end(),
+                           [&name](const PlotStyle& s) { return s.name == name; });
+    return it != m_plotStyles.end() ? &(*it) : nullptr;
+}
+
+void Document::savePlotStyle(PlotStyle style) {
+    for (PlotStyle& existing : m_plotStyles) {
+        if (existing.name == style.name) {
+            existing = std::move(style);
+            return;
+        }
+    }
+    m_plotStyles.push_back(std::move(style));
+}
+
+bool Document::deletePlotStyle(const std::string& name) {
+    const auto it = std::find_if(m_plotStyles.begin(), m_plotStyles.end(),
+                                 [&name](const PlotStyle& s) { return s.name == name; });
+    if (it == m_plotStyles.end()) return false;
+    m_plotStyles.erase(it);
+    return true;
+}
+
+PlotAppearance Document::plotAppearance(const Entity& e) const {
+    const Layer* layer = findLayer(e.layer());
+    PlotAppearance result;
+    result.color = layer ? layer->color : Color{255, 255, 255};
+    result.lineweight = layer ? layer->lineweight : 0.25;
+    result.linetype = layer ? layer->linetype : LineType::Continuous;
+
+    if (const auto& c = e.colorOverride()) result.color = *c;
+    if (const auto& lw = e.lineweightOverride()) result.lineweight = *lw;
+    if (const auto& lt = e.linetypeOverride()) result.linetype = *lt;
+
+    if (layer && !layer->plotStyle.empty()) {
+        if (const PlotStyle* style = findPlotStyle(layer->plotStyle)) {
+            if (style->color) result.color = *style->color;
+            if (style->lineweight) result.lineweight = *style->lineweight;
+            if (style->linetype) result.linetype = *style->linetype;
+        }
+    }
+    return result;
+}
+
 void Document::addEntity(std::unique_ptr<Entity> entity) {
     const EntityId id = entity->id();
     if (m_activeSpace >= 0 && m_activeSpace < static_cast<int>(m_layouts.size())) {

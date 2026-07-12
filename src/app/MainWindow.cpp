@@ -581,7 +581,10 @@ void MainWindow::renderLayout(QPrinter& printer, const lcad::Layout& layout) {
         return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
     };
 
-    const double penWidth = std::max(1.0, printer.resolution() / 72.0);
+    // A plotted lineweight of 0mm still needs to show up as a hairline.
+    const auto penWidthFor = [&printer](double lineweightMm) {
+        return std::max(1.0, lineweightMm * printer.resolution() / 25.4);
+    };
     for (const lcad::Viewport& vp : layout.viewports) {
         const QPointF tl = paperToPage(
             lcad::Point2D(vp.paperCenter.x - vp.paperWidth / 2.0, vp.paperCenter.y + vp.paperHeight / 2.0));
@@ -596,14 +599,11 @@ void MainWindow::renderLayout(QPrinter& printer, const lcad::Layout& layout) {
         for (const lcad::Entity* e : m_document.entities()) {
             const lcad::Layer* layer = m_document.findLayer(e->layer());
             if (layer && !layer->visible) continue;
-            lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
-            if (const auto& override = e->colorOverride()) c = *override;
-            QColor color(c.r, c.g, c.b);
-            if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
-            lcad::LineType linetype = layer ? layer->linetype : lcad::LineType::Continuous;
-            if (const auto& lt = e->linetypeOverride()) linetype = *lt;
-            EntityPainter::paint(painter, *e, toScreen, effScale, color, penWidth, linetype,
-                                 m_document.lineTypeScale(), &m_document);
+            const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
+            QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
+            if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
+            EntityPainter::paint(painter, *e, toScreen, effScale, color, penWidthFor(appearance.lineweight),
+                                 appearance.linetype, m_document.lineTypeScale(), &m_document);
         }
         painter.restore();
     }
@@ -613,14 +613,11 @@ void MainWindow::renderLayout(QPrinter& printer, const lcad::Layout& layout) {
     for (const lcad::Entity* e : m_document.paperEntities(layoutIndex)) {
         const lcad::Layer* layer = m_document.findLayer(e->layer());
         if (layer && !layer->visible) continue;
-        lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
-        if (const auto& override = e->colorOverride()) c = *override;
-        QColor color(c.r, c.g, c.b);
-        if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
-        lcad::LineType linetype = layer ? layer->linetype : lcad::LineType::Continuous;
-        if (const auto& lt = e->linetypeOverride()) linetype = *lt;
-        EntityPainter::paint(painter, *e, paperToPage, scale, color, penWidth, linetype,
-                             m_document.lineTypeScale(), &m_document);
+        const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
+        QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
+        if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
+        EntityPainter::paint(painter, *e, paperToPage, scale, color, penWidthFor(appearance.lineweight),
+                             appearance.linetype, m_document.lineTypeScale(), &m_document);
     }
 }
 
@@ -662,24 +659,18 @@ void MainWindow::renderDrawing(QPrinter& printer) {
         return QPointF((p.x - cx) * scale + pageCenter.x(), pageCenter.y() - (p.y - cy) * scale);
     };
 
-    // Roughly one printer's point of line width regardless of resolution.
-    const double penWidth = std::max(1.0, printer.resolution() / 72.0);
-
     for (const lcad::Entity* e : entities) {
         const lcad::Layer* layer = m_document.findLayer(e->layer());
         if (layer && !layer->visible) continue;
 
-        lcad::Color c = layer ? layer->color : lcad::Color{255, 255, 255};
-        if (const auto& override = e->colorOverride()) c = *override;
+        const lcad::PlotAppearance appearance = m_document.plotAppearance(*e);
         // Colors that read well on the dark canvas vanish on paper.
-        QColor color(c.r, c.g, c.b);
-        if (c.r > 200 && c.g > 200 && c.b > 200) color = Qt::black;
+        QColor color(appearance.color.r, appearance.color.g, appearance.color.b);
+        if (appearance.color.r > 200 && appearance.color.g > 200 && appearance.color.b > 200) color = Qt::black;
+        const double penWidth = std::max(1.0, appearance.lineweight * printer.resolution() / 25.4);
 
-        lcad::LineType linetype = layer ? layer->linetype : lcad::LineType::Continuous;
-        if (const auto& ltOverride = e->linetypeOverride()) linetype = *ltOverride;
-
-        EntityPainter::paint(painter, *e, toScreen, scale, color, penWidth, linetype, m_document.lineTypeScale(),
-                             &m_document);
+        EntityPainter::paint(painter, *e, toScreen, scale, color, penWidth, appearance.linetype,
+                             m_document.lineTypeScale(), &m_document);
     }
 }
 

@@ -1213,3 +1213,42 @@ TEST_CASE("DXF round-trips saved layer states", "[dxf][layerstate]") {
     REQUIRE(loaded.findLayer(wallsLayer)->visible);
     REQUIRE_FALSE(loaded.findLayer(wallsLayer)->locked);
 }
+
+TEST_CASE("DXF round-trips plot styles and their per-layer assignment", "[dxf][plotstyle]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    const lcad::LayerId wallsLayer = doc.addLayer("Walls", lcad::Color{200, 50, 50});
+
+    lcad::PlotStyle style;
+    style.name = "Print Black";
+    style.color = lcad::Color{0, 0, 0};
+    style.lineweight = 0.05;
+    // linetype deliberately left unset, to check it round-trips as nullopt.
+    doc.savePlotStyle(style);
+    doc.findLayer(wallsLayer)->plotStyle = "Print Black";
+
+    lcad::PlotStyle bare;
+    bare.name = "Unassigned"; // exists in the table but no layer uses it
+    doc.savePlotStyle(bare);
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    REQUIRE(loaded.plotStyles().size() == 2);
+    const lcad::PlotStyle* loadedStyle = loaded.findPlotStyle("Print Black");
+    REQUIRE(loadedStyle);
+    REQUIRE(loadedStyle->color.has_value());
+    REQUIRE(loadedStyle->color->r == 0);
+    REQUIRE(loadedStyle->lineweight.has_value());
+    REQUIRE(loadedStyle->lineweight.value() == Approx(0.05));
+    REQUIRE_FALSE(loadedStyle->linetype.has_value());
+
+    REQUIRE(loaded.findPlotStyle("Unassigned") != nullptr);
+
+    const lcad::Layer* loadedWalls = loaded.findLayer(wallsLayer);
+    REQUIRE(loadedWalls);
+    REQUIRE(loadedWalls->plotStyle == "Print Black");
+    REQUIRE(loaded.findLayer(0)->plotStyle.empty()); // layer "0" never had one assigned
+}

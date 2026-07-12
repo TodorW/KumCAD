@@ -17,6 +17,7 @@ struct Layer {
     bool visible = true;
     bool locked = false;
     double lineweight = 0.25; // mm; entities can override per-entity
+    std::string plotStyle; // names a PlotStyle in Document::plotStyles(); empty = plot as displayed
 };
 
 // One layer's saved properties within a LayerState snapshot.

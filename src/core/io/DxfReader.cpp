@@ -112,6 +112,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     bool haveGeo = false;
     GeoLocation pendingGeo;
     std::vector<LayerState> pendingLayerStates;
+    std::vector<PlotStyle> pendingPlotStyles;
 
     // STYLE table entry being accumulated.
     TextStyle curTextStyle;
@@ -147,6 +148,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     bool curLayerLocked = false;
     LineType curLayerLinetype = LineType::Continuous;
     double curLayerLineweight = 0.25;
+    std::string curLayerPlotStyle;
     bool haveLayerName = false;
 
     auto flushLayer = [&]() {
@@ -166,6 +168,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             layer->locked = curLayerLocked;
             layer->linetype = curLayerLinetype;
             layer->lineweight = curLayerLineweight;
+            layer->plotStyle = curLayerPlotStyle;
         }
         haveLayerName = false;
         curLayerColor = Color{255, 255, 255};
@@ -174,6 +177,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         curLayerLocked = false;
         curLayerLinetype = LineType::Continuous;
         curLayerLineweight = 0.25;
+        curLayerPlotStyle.clear();
     };
 
     // Block-definition state: while a BLOCK ... ENDBLK is open, flushed
@@ -810,6 +814,16 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                         else if (g.code == 40) en.lineweight = toDouble(g.value, 0.25);
                     }
                 }
+            } else if (curHeaderVar == "$KUMCAD_PLOTSTYLE") {
+                if (g.code == 1) {
+                    pendingPlotStyles.push_back(PlotStyle{});
+                    pendingPlotStyles.back().name = g.value;
+                } else if (!pendingPlotStyles.empty()) {
+                    PlotStyle& ps = pendingPlotStyles.back();
+                    if (g.code == 420) ps.color = colorFromTrueColor(toInt(g.value));
+                    else if (g.code == 40) ps.lineweight = toDouble(g.value);
+                    else if (g.code == 6) ps.linetype = lineTypeFromName(g.value);
+                }
             }
             continue;
         }
@@ -853,6 +867,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             } else if (g.code == 370) {
                 const int hundredths = toInt(g.value, 25);
                 if (hundredths > 0) curLayerLineweight = hundredths / 100.0;
+            } else if (g.code == 1) {
+                curLayerPlotStyle = g.value; // simplified plot style name; see the writer for why
             }
             continue;
         }
@@ -1087,6 +1103,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     if (!pendingDimStyle.empty()) fresh.setCurrentDimStyle(pendingDimStyle);
     if (haveGeo) fresh.setGeoLocation(pendingGeo);
     for (LayerState& state : pendingLayerStates) fresh.saveLayerState(std::move(state));
+    for (PlotStyle& style : pendingPlotStyles) fresh.savePlotStyle(std::move(style));
 
     document = std::move(fresh);
     return true;

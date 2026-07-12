@@ -204,3 +204,66 @@ TEST_CASE("Applying a layer state skips entries for since-deleted layers", "[doc
     REQUIRE(doc.findLayer(wallsLayer) == nullptr);
     REQUIRE(doc.layers().size() == 1);
 }
+
+TEST_CASE("Plot styles save, overwrite, and delete", "[document][plotstyle]") {
+    lcad::Document doc;
+    REQUIRE(doc.plotStyles().empty());
+
+    lcad::PlotStyle style;
+    style.name = "Thin Black";
+    style.color = lcad::Color{0, 0, 0};
+    style.lineweight = 0.13;
+    doc.savePlotStyle(style);
+    REQUIRE(doc.plotStyles().size() == 1);
+    REQUIRE(doc.findPlotStyle("Thin Black") != nullptr);
+    REQUIRE(doc.findPlotStyle("Thin Black")->lineweight == Approx(0.13));
+    REQUIRE(doc.findPlotStyle("Nonexistent") == nullptr);
+
+    // Saving under the same name overwrites rather than duplicating.
+    style.lineweight = 0.25;
+    doc.savePlotStyle(style);
+    REQUIRE(doc.plotStyles().size() == 1);
+    REQUIRE(doc.findPlotStyle("Thin Black")->lineweight == Approx(0.25));
+
+    REQUIRE(doc.deletePlotStyle("Thin Black"));
+    REQUIRE(doc.plotStyles().empty());
+    REQUIRE_FALSE(doc.deletePlotStyle("Thin Black"));
+}
+
+TEST_CASE("plotAppearance layers layer, entity override, then plot style", "[document][plotstyle]") {
+    lcad::Document doc;
+    const lcad::LayerId wallsLayer = doc.addLayer("Walls", lcad::Color{200, 50, 50});
+    doc.findLayer(wallsLayer)->lineweight = 0.35;
+    doc.findLayer(wallsLayer)->linetype = lcad::LineType::Dashed;
+
+    const lcad::EntityId id = doc.reserveEntityId();
+    auto line =
+        std::make_unique<lcad::LineEntity>(id, wallsLayer, lcad::Point2D(0, 0), lcad::Point2D(1, 1));
+    doc.addEntity(std::move(line));
+
+    // No overrides, no plot style: appearance is just the layer's.
+    lcad::PlotAppearance appearance = doc.plotAppearance(*doc.findEntity(id));
+    REQUIRE(appearance.color.r == 200);
+    REQUIRE(appearance.lineweight == Approx(0.35));
+    REQUIRE(appearance.linetype == lcad::LineType::Dashed);
+
+    // An entity color override beats the layer.
+    doc.findEntity(id)->setColorOverride(lcad::Color{10, 20, 30});
+    appearance = doc.plotAppearance(*doc.findEntity(id));
+    REQUIRE(appearance.color.r == 10);
+    REQUIRE(appearance.lineweight == Approx(0.35)); // lineweight still from the layer
+
+    // A plot style assigned to the layer overrides even the entity's own color.
+    lcad::PlotStyle style;
+    style.name = "Print Black";
+    style.color = lcad::Color{0, 0, 0};
+    style.lineweight = 0.05;
+    doc.savePlotStyle(style);
+    doc.findLayer(wallsLayer)->plotStyle = "Print Black";
+
+    appearance = doc.plotAppearance(*doc.findEntity(id));
+    REQUIRE(appearance.color.r == 0);
+    REQUIRE(appearance.color.g == 0);
+    REQUIRE(appearance.lineweight == Approx(0.05));
+    REQUIRE(appearance.linetype == lcad::LineType::Dashed); // style doesn't override linetype: falls through
+}

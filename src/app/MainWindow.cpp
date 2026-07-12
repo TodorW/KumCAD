@@ -85,9 +85,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_polarLabel = new QLabel(QStringLiteral("POLAR"), this);
     m_osnapLabel = new QLabel(QStringLiteral("OSNAP"), this);
     m_otrackLabel = new QLabel(QStringLiteral("OTRACK"), this);
-    for (QLabel* label : {m_gridLabel, m_orthoLabel, m_polarLabel, m_osnapLabel, m_otrackLabel}) {
-        label->setToolTip(
-            QStringLiteral("F9 Grid Snap / F8 Ortho / F10 Polar / F3 Object Snap / F11 Snap Tracking"));
+    m_dynLabel = new QLabel(QStringLiteral("DYN"), this);
+    for (QLabel* label : {m_gridLabel, m_orthoLabel, m_polarLabel, m_osnapLabel, m_otrackLabel, m_dynLabel}) {
+        label->setToolTip(QStringLiteral(
+            "F9 Grid Snap / F8 Ortho / F10 Polar / F3 Object Snap / F11 Snap Tracking / F12 Dynamic Input"));
     }
     statusBar()->addPermanentWidget(m_coordLabel);
     statusBar()->addPermanentWidget(m_gridLabel);
@@ -95,6 +96,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     statusBar()->addPermanentWidget(m_polarLabel);
     statusBar()->addPermanentWidget(m_osnapLabel);
     statusBar()->addPermanentWidget(m_otrackLabel);
+    statusBar()->addPermanentWidget(m_dynLabel);
     statusBar()->showMessage(QStringLiteral("Ready"));
     updateModeLabels();
 
@@ -193,19 +195,24 @@ void MainWindow::setupMenusAndToolbar() {
         viewMenu->addAction(QStringLiteral("Object Snap &Tracking"), QKeySequence(Qt::Key_F11), this,
                             [this]() { m_view->setOtrackEnabled(!m_view->otrackEnabled()); });
     otrackAction->setCheckable(true);
+    auto* dynAction = viewMenu->addAction(QStringLiteral("D&ynamic Input"), QKeySequence(Qt::Key_F12), this,
+                                          [this]() { m_view->setDynamicInputEnabled(!m_view->dynamicInputEnabled()); });
+    dynAction->setCheckable(true);
     connect(m_view, &DrawingView::modesChanged, this,
-            [this, osnapAction, orthoAction, gridSnapAction, polarAction, otrackAction]() {
+            [this, osnapAction, orthoAction, gridSnapAction, polarAction, otrackAction, dynAction]() {
                 osnapAction->setChecked(m_view->osnapEnabled());
                 orthoAction->setChecked(m_view->orthoEnabled());
                 gridSnapAction->setChecked(m_view->gridSnapEnabled());
                 polarAction->setChecked(m_view->polarEnabled());
                 otrackAction->setChecked(m_view->otrackEnabled());
+                dynAction->setChecked(m_view->dynamicInputEnabled());
             });
     osnapAction->setChecked(m_view->osnapEnabled());
     orthoAction->setChecked(m_view->orthoEnabled());
     gridSnapAction->setChecked(m_view->gridSnapEnabled());
     polarAction->setChecked(m_view->polarEnabled());
     otrackAction->setChecked(m_view->otrackEnabled());
+    dynAction->setChecked(m_view->dynamicInputEnabled());
 
     QToolBar* toolbar = addToolBar(QStringLiteral("Draw"));
     toolbar->setIconSize(QSize(22, 22));
@@ -255,7 +262,7 @@ void MainWindow::updateCoordLabel(const lcad::Point2D& pt) {
 }
 
 void MainWindow::updateModeLabels() {
-    if (!m_osnapLabel || !m_orthoLabel || !m_gridLabel || !m_polarLabel || !m_otrackLabel) return;
+    if (!m_osnapLabel || !m_orthoLabel || !m_gridLabel || !m_polarLabel || !m_otrackLabel || !m_dynLabel) return;
     auto style = [](bool on) {
         return on ? QStringLiteral("color: #7CFC9A; font-weight: bold;") : QStringLiteral("color: #888;");
     };
@@ -264,6 +271,7 @@ void MainWindow::updateModeLabels() {
     m_gridLabel->setStyleSheet(style(m_view->gridSnapEnabled()));
     m_polarLabel->setStyleSheet(style(m_view->polarEnabled()));
     m_otrackLabel->setStyleSheet(style(m_view->otrackEnabled()));
+    m_dynLabel->setStyleSheet(style(m_view->dynamicInputEnabled()));
 }
 
 void MainWindow::syncSpaceTabs() {

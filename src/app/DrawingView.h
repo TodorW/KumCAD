@@ -70,11 +70,13 @@ public:
     bool gridSnapEnabled() const { return m_gridSnapEnabled; }
     bool polarEnabled() const { return m_polarEnabled; }
     bool otrackEnabled() const { return m_otrackEnabled; }
+    bool dynamicInputEnabled() const { return m_dynamicInputEnabled; }
     void setOsnapEnabled(bool on);
     void setOrthoEnabled(bool on);
     void setGridSnapEnabled(bool on);
     void setPolarEnabled(bool on);
     void setOtrackEnabled(bool on);
+    void setDynamicInputEnabled(bool on);
 
     // LWDISPLAY: when on, entities render at their resolved lineweight
     // (override or layer) instead of a hairline.
@@ -127,6 +129,10 @@ private:
     void drawDragPreview(QPainter& painter);
     void drawSelectionBox(QPainter& painter);
     void drawSnapMarker(QPainter& painter);
+    // AutoCAD's dynamic input (F12): a small tooltip near the cursor showing
+    // absolute coordinates, or distance<angle off the active command's
+    // anchor point once it has one (e.g. LINE's second point).
+    void drawDynamicInput(QPainter& painter);
     void updateSelectionFromBox(const QRectF& screenBox, bool crossing);
 
     // Entities of the space being edited: model space, or the active
@@ -195,6 +201,7 @@ private:
     bool m_lineweightDisplay = false;
     bool m_polarEnabled = false;
     bool m_otrackEnabled = false;
+    bool m_dynamicInputEnabled = true;
     double m_polarIncrementDeg = 45.0;
     // Endpoint..Quadrant + Node + Intersection + Perpendicular + Tangent on by
     // default; Nearest off (it would swallow every free pick on an entity).

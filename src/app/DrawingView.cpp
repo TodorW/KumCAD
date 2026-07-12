@@ -358,6 +358,12 @@ void DrawingView::setOtrackEnabled(bool on) {
     update();
 }
 
+void DrawingView::setDynamicInputEnabled(bool on) {
+    m_dynamicInputEnabled = on;
+    emit modesChanged();
+    update();
+}
+
 void DrawingView::setActiveLayoutIndex(int index) {
     if (index >= static_cast<int>(m_document.layouts().size())) index = -1;
     m_layoutIndex = index;
@@ -473,6 +479,7 @@ void DrawingView::paintEvent(QPaintEvent*) {
         drawSelectionBox(painter);
         drawTrackingGuides(painter);
         drawSnapMarker(painter);
+        drawDynamicInput(painter);
         if (m_lastMouseWorld) {
             const QPointF c = worldToScreen(*m_lastMouseWorld);
             painter.setPen(QPen(QColor(120, 120, 120), 1));
@@ -526,6 +533,7 @@ void DrawingView::paintEvent(QPaintEvent*) {
     drawSelectionBox(painter);
     drawTrackingGuides(painter);
     drawSnapMarker(painter);
+    drawDynamicInput(painter);
 
     if (m_lastMouseWorld) {
         const QPointF c = worldToScreen(*m_lastMouseWorld);
@@ -708,6 +716,40 @@ void DrawingView::drawSnapMarker(QPainter& painter) {
         break;
     }
     }
+}
+
+void DrawingView::drawDynamicInput(QPainter& painter) {
+    if (!m_dynamicInputEnabled || !m_lastMouseWorld) return;
+    if (!m_dispatcher || !m_dispatcher->hasActiveCommand()) return;
+    DrawCommand* cmd = m_dispatcher->activeDrawCommand();
+    if (!cmd) return;
+
+    const lcad::Point2D cur = *m_lastMouseWorld;
+    QString text;
+    if (const auto anchor = cmd->anchorPoint()) {
+        const lcad::Point2D d = cur - *anchor;
+        const double dist = d.length();
+        double angleDeg = std::atan2(d.y, d.x) * 180.0 / M_PI;
+        if (angleDeg < 0) angleDeg += 360.0;
+        text = QStringLiteral("%1 < %2°").arg(dist, 0, 'f', 3).arg(angleDeg, 0, 'f', 1);
+    } else {
+        text = QStringLiteral("%1, %2").arg(cur.x, 0, 'f', 3).arg(cur.y, 0, 'f', 3);
+    }
+
+    const QPointF anchor = worldToScreen(cur) + QPointF(16, -12);
+    QFont font = painter.font();
+    font.setPixelSize(12);
+    painter.save();
+    painter.setFont(font);
+    const QFontMetrics metrics(font);
+    const QRectF background(anchor.x() - 4, anchor.y() - metrics.ascent() - 3,
+                            metrics.horizontalAdvance(text) + 8, metrics.height() + 4);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(15, 15, 15, 210));
+    painter.drawRoundedRect(background, 3.0, 3.0);
+    painter.setPen(QColor(230, 230, 230));
+    painter.drawText(anchor, text);
+    painter.restore();
 }
 
 void DrawingView::updateSelectionFromBox(const QRectF& screenBox, bool crossing) {

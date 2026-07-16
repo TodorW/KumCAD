@@ -1,0 +1,79 @@
+#include "core/core3d/StepIges.h"
+
+#include <IFSelect_ReturnStatus.hxx>
+#include <IGESControl_Reader.hxx>
+#include <IGESControl_Writer.hxx>
+#include <STEPControl_Reader.hxx>
+#include <STEPControl_Writer.hxx>
+#include <STEPControl_StepModelType.hxx>
+
+namespace lcad {
+
+namespace {
+
+// Features that are valid and never referenced as any other feature's
+// inputA/inputB -- these are the document's "final bodies" (see StepIges.h).
+std::vector<int> tipFeatureIndices(const Document3D& doc) {
+    const auto& features = doc.features();
+    std::vector<bool> referenced(features.size(), false);
+    for (const Feature3D& f : features) {
+        if (f.inputA >= 0) referenced[static_cast<std::size_t>(f.inputA)] = true;
+        if (f.inputB >= 0) referenced[static_cast<std::size_t>(f.inputB)] = true;
+    }
+    std::vector<int> tips;
+    for (std::size_t i = 0; i < features.size(); ++i) {
+        if (!referenced[i] && doc.isValid(static_cast<int>(i))) tips.push_back(static_cast<int>(i));
+    }
+    return tips;
+}
+
+} // namespace
+
+bool writeStep(const Document3D& doc, const std::string& path) {
+    const std::vector<int> tips = tipFeatureIndices(doc);
+    if (tips.empty()) return false;
+
+    STEPControl_Writer writer;
+    bool any = false;
+    for (int index : tips) {
+        const TopoDS_Shape& shape = doc.shapeAt(index);
+        if (shape.IsNull()) continue;
+        if (writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone) any = true;
+    }
+    if (!any) return false;
+    return writer.Write(path.c_str()) == IFSelect_RetDone;
+}
+
+bool writeIges(const Document3D& doc, const std::string& path) {
+    const std::vector<int> tips = tipFeatureIndices(doc);
+    if (tips.empty()) return false;
+
+    IGESControl_Writer writer;
+    bool any = false;
+    for (int index : tips) {
+        const TopoDS_Shape& shape = doc.shapeAt(index);
+        if (shape.IsNull()) continue;
+        if (writer.AddShape(shape)) any = true;
+    }
+    if (!any) return false;
+    writer.ComputeModel();
+    return writer.Write(path.c_str());
+}
+
+TopoDS_Shape readStep(const std::string& path) {
+    STEPControl_Reader reader;
+    if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) return TopoDS_Shape();
+    reader.TransferRoots();
+    if (reader.NbShapes() < 1) return TopoDS_Shape();
+    return reader.OneShape();
+}
+
+TopoDS_Shape readIges(const std::string& path) {
+    IGESControl_Reader reader;
+    if (reader.ReadFile(path.c_str()) != IFSelect_RetDone) return TopoDS_Shape();
+    reader.TransferRoots();
+    if (reader.NbShapes() < 1) return TopoDS_Shape();
+    return reader.OneShape();
+}
+
+} // namespace lcad

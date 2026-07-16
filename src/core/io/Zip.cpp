@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 
 namespace lcad {
 
@@ -102,6 +103,41 @@ bool writeZip(const std::string& path, const std::vector<std::pair<std::string, 
     out.write(central.data(), static_cast<std::streamsize>(central.size()));
     out.write(end.data(), static_cast<std::streamsize>(end.size()));
     return out.good();
+}
+
+namespace {
+std::uint16_t getU16(const std::string& data, std::size_t pos) {
+    return static_cast<std::uint16_t>(static_cast<unsigned char>(data[pos]) |
+                                       (static_cast<unsigned char>(data[pos + 1]) << 8));
+}
+std::uint32_t getU32(const std::string& data, std::size_t pos) {
+    return static_cast<std::uint32_t>(static_cast<unsigned char>(data[pos])) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[pos + 1])) << 8) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[pos + 2])) << 16) |
+           (static_cast<std::uint32_t>(static_cast<unsigned char>(data[pos + 3])) << 24);
+}
+} // namespace
+
+bool readZip(const std::string& path, std::vector<std::pair<std::string, std::string>>& entries) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+    std::vector<std::pair<std::string, std::string>> result;
+    std::size_t pos = 0;
+    while (pos + 30 <= data.size() && getU32(data, pos) == 0x04034b50) {
+        const std::uint16_t method = getU16(data, pos + 8);
+        const std::uint32_t size = getU32(data, pos + 22);
+        const std::uint16_t nameLen = getU16(data, pos + 26);
+        const std::uint16_t extraLen = getU16(data, pos + 28);
+        const std::size_t nameStart = pos + 30;
+        const std::size_t contentStart = nameStart + nameLen + extraLen;
+        if (method != 0 || contentStart + size > data.size()) return false; // not store-only, or truncated
+        result.emplace_back(data.substr(nameStart, nameLen), data.substr(contentStart, size));
+        pos = contentStart + size;
+    }
+    entries = std::move(result);
+    return true;
 }
 
 } // namespace lcad

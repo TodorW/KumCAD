@@ -43,6 +43,12 @@ enum class FeatureType {
                    // (a real Mirror feature keeps both; a plain "replace"
                    // copy would just discard the source, which is rarely
                    // what's wanted)
+    Imported,      // a shape read from an external STEP/IGES file (see
+                   // StepIges.h) or loaded back from a .kcad3d's embedded
+                   // BRep blob (see Persistence3D.h). Has no parametric
+                   // recipe of its own -- importIndex points into the owning
+                   // Document3D's importedShapes(), and recompute just
+                   // copies that shape verbatim rather than rebuilding it.
 };
 
 struct Feature3D {
@@ -78,6 +84,9 @@ struct Feature3D {
 
     // Repeat count (including the original) -- LinearPattern/PolarPattern only.
     int count = 1;
+
+    // Which Document3D::importedShapes() entry this feature is -- Imported only.
+    int importIndex = -1;
 
     static bool isBoolean(FeatureType t) { return t == FeatureType::Union || t == FeatureType::Cut || t == FeatureType::Intersect; }
     bool isBoolean() const { return isBoolean(type); }

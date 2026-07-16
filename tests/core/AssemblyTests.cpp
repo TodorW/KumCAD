@@ -1,0 +1,203 @@
+#include "core/core3d/Assembly.h"
+
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <gp_Pnt.hxx>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+using namespace lcad;
+using Catch::Approx;
+
+namespace {
+TopoDS_Shape makeBox(double s) {
+    return BRepPrimAPI_MakeBox(s, s, s).Shape();
+}
+} // namespace
+
+TEST_CASE("Assembly Coincident mate places componentB's reference point onto componentA's, anti-parallel", "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.name = "Base";
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.name = "Lid";
+    b.shape = makeBox(10.0);
+    const int idxB = asm_.addComponent(b);
+
+    // Mate the top face of A (z=10, outward normal +Z) to the bottom face
+    // of B (z=0, outward normal -Z) -- the classic "stack B on top of A"
+    // face mate. Coincident anti-aligns the two reference directions,
+    // which is what makes two *outward* face normals point at each other
+    // when the faces touch -- since bottom's own outward normal is already
+    // -Z, no flip is needed and B should land right-side up.
+    Mate mate;
+    mate.type = MateType::Coincident;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 5.0; mate.ay = 5.0; mate.az = 10.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0;
+    mate.bx = 5.0; mate.by = 5.0; mate.bz = 0.0;
+    mate.bdx = 0.0; mate.bdy = 0.0; mate.bdz = -1.0;
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    const gp_Pnt localRefB(5.0, 5.0, 0.0);
+    const gp_Trsf& placement = asm_.components()[static_cast<std::size_t>(idxB)].placement;
+    const gp_Pnt worldRefB = localRefB.Transformed(placement);
+    REQUIRE(worldRefB.X() == Approx(5.0).margin(1e-6));
+    REQUIRE(worldRefB.Y() == Approx(5.0).margin(1e-6));
+    REQUIRE(worldRefB.Z() == Approx(10.0).margin(1e-6));
+
+    // No flip needed (see comment above) -- B's own local +Z should still
+    // point world +Z, i.e. B lands right-side up (a flip would instead put
+    // this point at world Z=9, one below the seam, not one above it).
+    const gp_Pnt tipWorld = gp_Pnt(5.0, 5.0, 1.0).Transformed(placement);
+    REQUIRE(tipWorld.Z() == Approx(11.0).margin(1e-6));
+}
+
+TEST_CASE("Assembly Distance mate offsets componentB's reference point along the shared normal", "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(10.0);
+    const int idxB = asm_.addComponent(b);
+
+    Mate mate;
+    mate.type = MateType::Distance;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 5.0; mate.ay = 5.0; mate.az = 10.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0;
+    mate.bx = 5.0; mate.by = 5.0; mate.bz = 0.0;
+    mate.bdx = 0.0; mate.bdy = 0.0; mate.bdz = -1.0;
+    mate.value = 4.0; // 4 units of air gap above A
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    const gp_Pnt localRefB(5.0, 5.0, 0.0);
+    const gp_Pnt worldRefB = localRefB.Transformed(asm_.components()[static_cast<std::size_t>(idxB)].placement);
+    REQUIRE(worldRefB.Z() == Approx(14.0).margin(1e-6));
+}
+
+TEST_CASE("Assembly Concentric mate aligns componentB's axis parallel (not flipped) to componentA's", "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(4.0);
+    const int idxB = asm_.addComponent(b);
+
+    Mate mate;
+    mate.type = MateType::Concentric;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 5.0; mate.ay = 5.0; mate.az = 0.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0; // A's axis points +Z
+    mate.bx = 2.0; mate.by = 2.0; mate.bz = 0.0;
+    mate.bdx = 0.0; mate.bdy = 0.0; mate.bdz = 1.0; // B's axis, also local +Z
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    // Concentric keeps directions parallel (same sense), unlike Coincident's
+    // flip -- B's local +Z reference direction should still point +Z in
+    // world space, and its reference point should land exactly on A's.
+    const gp_Trsf& placement = asm_.components()[static_cast<std::size_t>(idxB)].placement;
+    const gp_Pnt worldRefB = gp_Pnt(2.0, 2.0, 0.0).Transformed(placement);
+    REQUIRE(worldRefB.X() == Approx(5.0).margin(1e-6));
+    REQUIRE(worldRefB.Y() == Approx(5.0).margin(1e-6));
+    REQUIRE(worldRefB.Z() == Approx(0.0).margin(1e-6));
+
+    const gp_Pnt tipLocal(2.0, 2.0, 1.0); // one unit up B's local axis from its reference point
+    const gp_Pnt tipWorld = tipLocal.Transformed(placement);
+    REQUIRE(tipWorld.Z() == Approx(1.0).margin(1e-6)); // still moving in +Z, not flipped to -Z
+}
+
+TEST_CASE("Assembly Angle mate rotates componentB around the shared axis by the given angle", "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(4.0);
+    const int idxB = asm_.addComponent(b);
+
+    Mate mate;
+    mate.type = MateType::Angle;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 0.0; mate.ay = 0.0; mate.az = 0.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0; // shared axis is world Z through the origin
+    mate.bx = 0.0; mate.by = 0.0; mate.bz = 0.0;
+    mate.bdx = 0.0; mate.bdy = 0.0; mate.bdz = 1.0;
+    mate.value = 90.0; // spin B 90 degrees around that axis
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    // A point 1 unit along B's local +X should end up along world +Y after
+    // a 90-degree spin around +Z.
+    const gp_Pnt tipWorld = gp_Pnt(1.0, 0.0, 0.0).Transformed(asm_.components()[static_cast<std::size_t>(idxB)].placement);
+    REQUIRE(tipWorld.X() == Approx(0.0).margin(1e-6));
+    REQUIRE(tipWorld.Y() == Approx(1.0).margin(1e-6));
+    REQUIRE(tipWorld.Z() == Approx(0.0).margin(1e-6));
+}
+
+TEST_CASE("Assembly solves a mate chain in list order, matching Document3D's own append-order convention", "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent base;
+    base.shape = makeBox(10.0);
+    base.fixed = true;
+    const int idxBase = asm_.addComponent(base);
+
+    AssemblyComponent middle;
+    middle.shape = makeBox(10.0);
+    const int idxMiddle = asm_.addComponent(middle);
+
+    AssemblyComponent top;
+    top.shape = makeBox(10.0);
+    const int idxTop = asm_.addComponent(top);
+
+    // Each mate is A's top face (outward +Z) to B's bottom face (outward
+    // -Z) -- see the first Coincident test's comment for why that's a
+    // no-flip stack, which is what lets this chain add up cleanly.
+    Mate baseToMiddle;
+    baseToMiddle.type = MateType::Coincident;
+    baseToMiddle.componentA = idxBase;
+    baseToMiddle.componentB = idxMiddle;
+    baseToMiddle.az = 10.0;
+    baseToMiddle.adz = 1.0;
+    baseToMiddle.bz = 0.0;
+    baseToMiddle.bdz = -1.0;
+    asm_.addMate(baseToMiddle);
+
+    Mate middleToTop;
+    middleToTop.type = MateType::Coincident;
+    middleToTop.componentA = idxMiddle; // depends on middle already being placed by the mate above
+    middleToTop.componentB = idxTop;
+    middleToTop.az = 10.0;
+    middleToTop.adz = 1.0;
+    middleToTop.bz = 0.0;
+    middleToTop.bdz = -1.0;
+    asm_.addMate(middleToTop);
+
+    asm_.solve();
+
+    const gp_Pnt topOrigin = gp_Pnt(0, 0, 0).Transformed(asm_.components()[static_cast<std::size_t>(idxTop)].placement);
+    REQUIRE(topOrigin.Z() == Approx(20.0).margin(1e-6)); // stacked base(0-10) + middle(10-20) + top starts at 20
+}

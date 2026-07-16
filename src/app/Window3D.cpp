@@ -1,17 +1,25 @@
 #include "Window3D.h"
+#include "AssemblyWindow.h"
 #include "SketchEditorDialog.h"
 #include "SketchFeatureDialog.h"
 #include "SketchView.h"
 #include "Viewport3D.h"
 
 #include "core/core3d/Commands3D.h"
+#include "core/core3d/Persistence3D.h"
+#include "core/core3d/StepIges.h"
 
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -42,6 +50,7 @@ QString typeName(FeatureType type) {
     case FeatureType::LinearPattern: return QStringLiteral("Linear Pattern");
     case FeatureType::PolarPattern: return QStringLiteral("Polar Pattern");
     case FeatureType::Mirror: return QStringLiteral("Mirror");
+    case FeatureType::Imported: return QStringLiteral("Imported");
     }
     return QStringLiteral("Feature");
 }
@@ -123,6 +132,18 @@ private:
 Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(QStringLiteral("KumCAD — 3D Modeling (early preview)"));
     resize(1200, 800);
+
+    QMenu* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
+    fileMenu->addAction(QStringLiteral("Import STEP..."), this, &Window3D::importStepFile);
+    fileMenu->addAction(QStringLiteral("Import IGES..."), this, &Window3D::importIgesFile);
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("Export STEP..."), this, &Window3D::exportStepFile);
+    fileMenu->addAction(QStringLiteral("Export IGES..."), this, &Window3D::exportIgesFile);
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("Save As .kcad3d..."), this, &Window3D::saveKcad3dFile);
+    fileMenu->addAction(QStringLiteral("Open .kcad3d..."), this, &Window3D::openKcad3dFile);
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("New Assembly Window..."), this, &Window3D::openAssemblyWindow);
 
     m_viewport = new Viewport3D(this);
     setCentralWidget(m_viewport);
@@ -274,6 +295,106 @@ void Window3D::redo() {
     m_document.commandStack().redo();
     refreshFeatureList();
     refreshViewport();
+}
+
+void Window3D::importStepFile() {
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Import STEP"), QString(),
+                                                        QStringLiteral("STEP Files (*.step *.stp)"));
+    if (path.isEmpty()) return;
+    const TopoDS_Shape shape = lcad::readStep(path.toStdString());
+    if (shape.IsNull()) {
+        QMessageBox::warning(this, QStringLiteral("Import Failed"), QStringLiteral("Could not read that STEP file."));
+        return;
+    }
+    const int importIdx = m_document.addImportedShape(shape);
+    Feature3D feature;
+    feature.type = FeatureType::Imported;
+    feature.name = QFileInfo(path).baseName().toStdString();
+    feature.importIndex = importIdx;
+    m_document.commandStack().execute(std::make_unique<AddFeature3DCommand>(m_document, feature));
+    refreshFeatureList();
+    refreshViewport();
+}
+
+void Window3D::importIgesFile() {
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Import IGES"), QString(),
+                                                        QStringLiteral("IGES Files (*.igs *.iges)"));
+    if (path.isEmpty()) return;
+    const TopoDS_Shape shape = lcad::readIges(path.toStdString());
+    if (shape.IsNull()) {
+        QMessageBox::warning(this, QStringLiteral("Import Failed"), QStringLiteral("Could not read that IGES file."));
+        return;
+    }
+    const int importIdx = m_document.addImportedShape(shape);
+    Feature3D feature;
+    feature.type = FeatureType::Imported;
+    feature.name = QFileInfo(path).baseName().toStdString();
+    feature.importIndex = importIdx;
+    m_document.commandStack().execute(std::make_unique<AddFeature3DCommand>(m_document, feature));
+    refreshFeatureList();
+    refreshViewport();
+}
+
+void Window3D::exportStepFile() {
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export STEP"), QString(),
+                                                        QStringLiteral("STEP Files (*.step)"));
+    if (path.isEmpty()) return;
+    if (!lcad::writeStep(m_document, path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("STEP export failed -- no valid tip solid in the document"), 4000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Exported STEP to %1").arg(path), 3000);
+}
+
+void Window3D::exportIgesFile() {
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export IGES"), QString(),
+                                                        QStringLiteral("IGES Files (*.igs)"));
+    if (path.isEmpty()) return;
+    if (!lcad::writeIges(m_document, path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("IGES export failed -- no valid tip solid in the document"), 4000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Exported IGES to %1").arg(path), 3000);
+}
+
+void Window3D::saveKcad3dFile() {
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save .kcad3d"), QString(),
+                                                        QStringLiteral("KumCAD 3D Documents (*.kcad3d)"));
+    if (path.isEmpty()) return;
+    if (!lcad::saveDocument3D(m_document, path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("Save failed"), 4000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Saved to %1").arg(path), 3000);
+}
+
+void Window3D::openKcad3dFile() {
+    const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Open .kcad3d"), QString(),
+                                                        QStringLiteral("KumCAD 3D Documents (*.kcad3d)"));
+    if (path.isEmpty()) return;
+
+    // Opens into a brand-new window rather than replacing this one --
+    // loadDocument3D's contract is "load into a freshly-constructed
+    // Document3D", and a new Window3D's document is exactly that, so this
+    // sidesteps ever needing to reset/clear an in-use Document3D (which
+    // isn't supported -- see Persistence3D.h's own disclosure).
+    auto* window = new Window3D(nullptr);
+    window->setAttribute(Qt::WA_DeleteOnClose);
+    if (!lcad::loadDocument3D(window->m_document, path.toStdString())) {
+        QMessageBox::warning(this, QStringLiteral("Open Failed"), QStringLiteral("Could not read that .kcad3d file."));
+        delete window;
+        return;
+    }
+    window->setWindowTitle(QStringLiteral("KumCAD — 3D Modeling — %1").arg(QFileInfo(path).fileName()));
+    window->refreshFeatureList();
+    window->refreshViewport();
+    window->show();
+}
+
+void Window3D::openAssemblyWindow() {
+    auto* window = new AssemblyWindow(nullptr);
+    window->setAttribute(Qt::WA_DeleteOnClose);
+    window->show();
 }
 
 void Window3D::refreshFeatureList() {

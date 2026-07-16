@@ -58,12 +58,21 @@ public:
     int addSketch(Sketch sketch);
     const std::vector<Sketch>& sketches() const { return m_sketches; }
 
+    // Shapes with no parametric recipe of their own -- read from an
+    // external STEP/IGES file (StepIges.h) or restored from a .kcad3d's
+    // embedded BRep blob (Persistence3D.h). A FeatureType::Imported
+    // feature's importIndex points into this list; recompute just copies
+    // the shape verbatim.
+    int addImportedShape(TopoDS_Shape shape);
+    const std::vector<TopoDS_Shape>& importedShapes() const { return m_importedShapes; }
+
 private:
     std::vector<Feature3D> m_features;
     std::vector<TopoDS_Shape> m_shapes;
     std::vector<bool> m_valid;
     CommandStack m_commandStack;
     std::vector<Sketch> m_sketches;
+    std::vector<TopoDS_Shape> m_importedShapes;
 
     void recomputeOne(int index);
 };

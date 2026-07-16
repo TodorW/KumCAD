@@ -28,6 +28,17 @@ private:
     void refreshFeatureList();
     void refreshViewport();
 
+    // Sprint 4: STEP/IGES interchange + native .kcad3d persistence.
+    void importStepFile();
+    void importIgesFile();
+    void exportStepFile();
+    void exportIgesFile();
+    void saveKcad3dFile();
+    void openKcad3dFile();
+
+    // Sprint 5: opens a separate top-level Assembly window.
+    void openAssemblyWindow();
+
     lcad::Document3D m_document;
     Viewport3D* m_viewport = nullptr;
     QListWidget* m_featureList = nullptr;

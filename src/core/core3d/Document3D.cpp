@@ -96,6 +96,11 @@ int Document3D::addSketch(Sketch sketch) {
     return static_cast<int>(m_sketches.size()) - 1;
 }
 
+int Document3D::addImportedShape(TopoDS_Shape shape) {
+    m_importedShapes.push_back(std::move(shape));
+    return static_cast<int>(m_importedShapes.size()) - 1;
+}
+
 const Feature3D* Document3D::findFeature(int index) const {
     if (index < 0 || index >= static_cast<int>(m_features.size())) return nullptr;
     return &m_features[static_cast<std::size_t>(index)];
@@ -298,6 +303,14 @@ void Document3D::recomputeOne(int index) {
             }
             shape = op.Shape();
         }
+        break;
+    }
+    case FeatureType::Imported: {
+        if (f.importIndex < 0 || f.importIndex >= static_cast<int>(m_importedShapes.size())) {
+            ok = false;
+            break;
+        }
+        shape = m_importedShapes[static_cast<std::size_t>(f.importIndex)];
         break;
     }
     case FeatureType::Mirror: {

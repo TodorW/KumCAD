@@ -280,6 +280,83 @@ QIcon eraseIcon() {
     });
 }
 
+namespace {
+
+QIcon buildLarge(const std::function<void(QPainter&)>& draw) {
+    constexpr int size = 56;
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QPen pen(kStroke, 2.4);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+
+    draw(painter);
+    return QIcon(pixmap);
+}
+
+} // namespace
+
+QIcon mode2DIcon() {
+    return buildLarge([](QPainter& painter) {
+        painter.drawRect(QRectF(11, 11, 34, 34));
+        painter.drawLine(QPointF(11, 34), QPointF(34, 11));
+        dot(painter, QPointF(11, 34));
+        dot(painter, QPointF(34, 11));
+    });
+}
+
+QIcon mode3DIcon() {
+    return buildLarge([](QPainter& painter) {
+        // Wireframe cube in a simple isometric projection.
+        const QPointF ftl(13, 20), ftr(33, 20), fbl(13, 40), fbr(33, 40);
+        const QPointF btl(21, 11), btr(41, 11), bbl(21, 31), bbr(41, 31);
+        painter.drawLine(ftl, ftr);
+        painter.drawLine(ftr, fbr);
+        painter.drawLine(fbr, fbl);
+        painter.drawLine(fbl, ftl);
+        painter.drawLine(btl, btr);
+        painter.drawLine(btr, bbr);
+        painter.drawLine(bbr, bbl);
+        painter.drawLine(bbl, btl);
+        painter.drawLine(ftl, btl);
+        painter.drawLine(ftr, btr);
+        painter.drawLine(fbr, bbr);
+        painter.drawLine(fbl, bbl);
+    });
+}
+
+QIcon modePcbIcon() {
+    return buildLarge([](QPainter& painter) {
+        painter.drawRect(QRectF(15, 15, 26, 26));
+        // Pin stubs on all four sides, like a chip package.
+        auto pin = [&](QPointF a, QPointF b) { painter.drawLine(a, b); };
+        pin(QPointF(21, 15), QPointF(21, 9));
+        pin(QPointF(29, 15), QPointF(29, 9));
+        pin(QPointF(21, 41), QPointF(21, 47));
+        pin(QPointF(29, 41), QPointF(29, 47));
+        pin(QPointF(15, 21), QPointF(9, 21));
+        pin(QPointF(15, 29), QPointF(9, 29));
+        pin(QPointF(41, 21), QPointF(47, 21));
+        pin(QPointF(41, 29), QPointF(47, 29));
+        dot(painter, QPointF(20, 20));
+    });
+}
+
+QIcon modeOtherIcon() {
+    return buildLarge([](QPainter& painter) {
+        painter.setBrush(kStroke);
+        dot(painter, QPointF(15, 28));
+        dot(painter, QPointF(28, 28));
+        dot(painter, QPointF(41, 28));
+        painter.setBrush(Qt::NoBrush);
+    });
+}
+
 QIcon appIcon() {
     constexpr int size = 64;
     QPixmap pixmap(size, size);

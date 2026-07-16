@@ -1,0 +1,232 @@
+#include "core/document/Document.h"
+#include "core/geometry/Hatch.h"
+#include "core/geometry/Insert.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/pcb/Drc.h"
+#include "core/pcb/GerberWriter.h"
+#include "core/pcb/Ratsnest.h"
+#include "core/schematic/SymbolLibrary.h"
+
+#include <algorithm>
+#include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
+using namespace lcad;
+
+namespace {
+struct TempPath {
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() / ("kumcad_pcb_test_" + std::to_string(std::rand()) + ".txt");
+    ~TempPath() { std::filesystem::remove(path); }
+};
+
+std::string readFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream oss;
+    oss << in.rdbuf();
+    return oss.str();
+}
+} // namespace
+
+TEST_CASE("parseNetlist reads formatNetlist's own output back", "[pcb][netlist]") {
+    const std::string text = "# KumCAD netlist\nNET \"VCC\"\n  R1.1\n  U1.8\nNET \"Net1\"\n  R1.2\n  R2.1\n";
+    const std::vector<ImportedNet> nets = parseNetlist(text);
+
+    REQUIRE(nets.size() == 2);
+    REQUIRE(nets[0].name == "VCC");
+    REQUIRE(nets[0].pins.size() == 2);
+    REQUIRE(nets[0].pins[0].refDes == "R1");
+    REQUIRE(nets[0].pins[0].pinNumber == "1");
+    REQUIRE(nets[1].name == "Net1");
+    REQUIRE(nets[1].pins.size() == 2);
+}
+
+TEST_CASE("computeRatsnest connects two placed footprints on the same net with no copper yet",
+         "[pcb][ratsnest]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    REQUIRE(rfp);
+
+    auto insertA = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insertA->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insertA));
+    auto insertB = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(50, 0));
+    insertB->setAttribute("REFDES", "R2");
+    doc.addEntity(std::move(insertB));
+
+    ImportedNet net;
+    net.name = "Net1";
+    net.pins = {{"R1", "2"}, {"R2", "1"}};
+
+    const std::vector<RatsnestLine> lines = computeRatsnest(doc, {net});
+    REQUIRE(lines.size() == 1);
+    // R1 pad 2 is at world (10,0), R2 pad 1 is at world (50,0).
+    const bool matches = (lines[0].a.distanceTo(Point2D(10, 0)) < 1e-6 && lines[0].b.distanceTo(Point2D(50, 0)) < 1e-6) ||
+                        (lines[0].b.distanceTo(Point2D(10, 0)) < 1e-6 && lines[0].a.distanceTo(Point2D(50, 0)) < 1e-6);
+    REQUIRE(matches);
+}
+
+TEST_CASE("computeRatsnest finds no airwire once a Track already joins the pads", "[pcb][ratsnest]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+
+    auto insertA = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insertA->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insertA));
+    auto insertB = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(50, 0));
+    insertB->setAttribute("REFDES", "R2");
+    doc.addEntity(std::move(insertB));
+    // R1 pad 2 (10,0) to R2 pad 1 (50,0), already routed.
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(10, 0), Point2D(50, 0)}));
+
+    ImportedNet net;
+    net.name = "Net1";
+    net.pins = {{"R1", "2"}, {"R2", "1"}};
+
+    const std::vector<RatsnestLine> lines = computeRatsnest(doc, {net});
+    REQUIRE(lines.empty());
+}
+
+TEST_CASE("registerBuiltinSymbols adds usable footprints alongside symbols", "[pcb][library]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    REQUIRE(rfp);
+    REQUIRE(rfp->isFootprint());
+    REQUIRE(rfp->pads.size() == 2);
+
+    const BlockDefinition* icfp = doc.findBlock("IC_FP");
+    REQUIRE(icfp);
+    REQUIRE(icfp->pads.size() == 4);
+}
+
+TEST_CASE("runDrc flags a track under the minimum width", "[pcb][drc]") {
+    Document doc;
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(0, 0), Point2D(10, 0)}, 0.05));
+    const std::vector<DrcViolation> violations = runDrc(doc);
+    const bool hasWidthIssue = std::any_of(violations.begin(), violations.end(),
+                                           [](const DrcViolation& v) { return v.message.find("width") != std::string::npos; });
+    REQUIRE(hasWidthIssue);
+}
+
+TEST_CASE("runDrc flags a via whose drill isn't smaller than its own pad", "[pcb][drc]") {
+    Document doc;
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(0, 0), 0.5, 0.6));
+    const std::vector<DrcViolation> violations = runDrc(doc);
+    const bool hasDrillIssue = std::any_of(violations.begin(), violations.end(),
+                                           [](const DrcViolation& v) { return v.message.find("drill") != std::string::npos; });
+    REQUIRE(hasDrillIssue);
+}
+
+TEST_CASE("runDrc flags unconnected copper closer than the clearance and clears once joined",
+         "[pcb][drc]") {
+    Document doc;
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(0, 0), 0.6, 0.3));
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(0.5, 0), 0.6, 0.3));
+
+    DrcRules rules;
+    const std::vector<DrcViolation> violations = runDrc(doc, rules);
+    const bool hasClearanceIssue = std::any_of(
+        violations.begin(), violations.end(), [](const DrcViolation& v) { return v.message.find("Clearance") != std::string::npos; });
+    REQUIRE(hasClearanceIssue);
+
+    // Joining them with a track (same connectivity component) clears the
+    // violation even though they're still physically close.
+    Document doc2;
+    doc2.addEntity(std::make_unique<ViaEntity>(doc2.reserveEntityId(), doc2.currentLayer(), Point2D(0, 0), 0.6, 0.3));
+    doc2.addEntity(std::make_unique<ViaEntity>(doc2.reserveEntityId(), doc2.currentLayer(), Point2D(0.5, 0), 0.6, 0.3));
+    doc2.addEntity(std::make_unique<TrackEntity>(doc2.reserveEntityId(), doc2.currentLayer(),
+                                                 std::vector<Point2D>{Point2D(0, 0), Point2D(0.5, 0)}, 0.25));
+    const std::vector<DrcViolation> violations2 = runDrc(doc2, rules);
+    const bool stillHasClearanceIssue = std::any_of(
+        violations2.begin(), violations2.end(), [](const DrcViolation& v) { return v.message.find("Clearance") != std::string::npos; });
+    REQUIRE_FALSE(stillHasClearanceIssue);
+}
+
+TEST_CASE("writeGerberLayer emits a well-formed RS-274X file with apertures, draws, and flashes",
+         "[pcb][gerber]") {
+    TempPath temp;
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(10, 0), Point2D(20, 0)}, 0.25));
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(20, 0), 0.6, 0.3));
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string()));
+    const std::string text = readFile(temp.path);
+
+    REQUIRE(text.find("%FSLAX35Y35*%") != std::string::npos);
+    REQUIRE(text.find("%MOMM*%") != std::string::npos);
+    REQUIRE(text.find("%ADD10C,") != std::string::npos); // track width aperture
+    REQUIRE(text.find("D02*") != std::string::npos);     // track move
+    REQUIRE(text.find("D01*") != std::string::npos);     // track draw
+    REQUIRE(text.find("D03*") != std::string::npos);     // via/pad flash
+    REQUIRE(text.find("M02*") != std::string::npos);
+}
+
+TEST_CASE("writeGerberLayer draws a solid Hatch as a G36/G37 region (a copper pour)", "[pcb][gerber]") {
+    TempPath temp;
+    Document doc;
+    doc.addEntity(std::make_unique<HatchEntity>(
+        doc.reserveEntityId(), doc.currentLayer(),
+        std::vector<Point2D>{Point2D(0, 0), Point2D(10, 0), Point2D(10, 10), Point2D(0, 10)}, HatchPattern::Solid,
+        1.0, 0.0));
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string()));
+    const std::string text = readFile(temp.path);
+    REQUIRE(text.find("G36*") != std::string::npos);
+    REQUIRE(text.find("G37*") != std::string::npos);
+}
+
+TEST_CASE("writeExcellonDrill lists one tool per distinct drill diameter", "[pcb][drill]") {
+    TempPath temp;
+    Document doc;
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(0, 0), 0.6, 0.3));
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(10, 0), 0.6, 0.3));
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), Point2D(20, 0), 0.8, 0.5));
+
+    REQUIRE(writeExcellonDrill(doc, temp.path.string()));
+    const std::string text = readFile(temp.path);
+
+    REQUIRE(text.find("M48") != std::string::npos);
+    REQUIRE(text.find("T01") != std::string::npos);
+    REQUIRE(text.find("T02") != std::string::npos);
+    REQUIRE(text.find("M30") != std::string::npos);
+    // Two distinct diameters (0.3, 0.5) means exactly two tool definitions,
+    // not three holes each with their own tool ("METRIC" itself contains a
+    // C, so count "T0<n>C" tool-definition markers specifically).
+    int toolDefCount = 0;
+    for (std::size_t pos = text.find("T0"); pos != std::string::npos; pos = text.find("T0", pos + 1)) {
+        if (pos + 3 < text.size() && text[pos + 3] == 'C') ++toolDefCount;
+    }
+    REQUIRE(toolDefCount == 2);
+}
+
+TEST_CASE("writePickAndPlace lists each footprint's reference designator and position", "[pcb][pnp]") {
+    TempPath temp;
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(5, 7));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    REQUIRE(writePickAndPlace(doc, temp.path.string()));
+    const std::string text = readFile(temp.path);
+
+    REQUIRE(text.find("RefDes,Footprint,X,Y,RotationDeg") != std::string::npos);
+    REQUIRE(text.find("R1,R_FP,5,7") != std::string::npos);
+}

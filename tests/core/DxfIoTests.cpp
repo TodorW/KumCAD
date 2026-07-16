@@ -9,6 +9,9 @@
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -18,6 +21,9 @@
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/geometry/Wire.h"
 #include "core/io/DxfColors.h"
 #include "core/io/DxfReader.h"
 #include "core/io/DxfWriter.h"
@@ -143,6 +149,22 @@ TEST_CASE("DXF round-trip preserves entities and layers", "[dxf]") {
         case lcad::EntityType::Dimension:
         case lcad::EntityType::Hatch:
         case lcad::EntityType::Insert:
+        case lcad::EntityType::MText:
+        case lcad::EntityType::Leader:
+        case lcad::EntityType::MLeader:
+        case lcad::EntityType::Spline:
+        case lcad::EntityType::Point:
+        case lcad::EntityType::ConstructionLine:
+        case lcad::EntityType::AttDef:
+        case lcad::EntityType::Table:
+        case lcad::EntityType::Image:
+        case lcad::EntityType::PointCloud:
+        case lcad::EntityType::Wire:
+        case lcad::EntityType::Junction:
+        case lcad::EntityType::NoConnect:
+        case lcad::EntityType::NetLabel:
+        case lcad::EntityType::Track:
+        case lcad::EntityType::Via:
             break; // not part of this round-trip; covered by their own tests
         }
     }
@@ -1270,4 +1292,123 @@ TEST_CASE("DXF round-trips plot styles and their per-layer assignment", "[dxf][p
     REQUIRE(loadedWalls);
     REQUIRE(loadedWalls->plotStyle == "Print Black");
     REQUIRE(loaded.findLayer(0)->plotStyle.empty()); // layer "0" never had one assigned
+}
+
+TEST_CASE("DXF round-trips schematic symbols, pins, wires, junctions, and net labels", "[dxf][schematic]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addBlock("R", {});
+    lcad::BlockDefinition* block = doc.findBlock("R");
+    block->pins.push_back(lcad::Pin{"1", "1", lcad::PinElectricalType::Passive, lcad::Point2D(0, 0),
+                                    lcad::Point2D(-5, 0)});
+    block->pins.push_back(lcad::Pin{"2", "2", lcad::PinElectricalType::Power, lcad::Point2D(10, 0),
+                                    lcad::Point2D(15, 0)});
+
+    doc.addEntity(std::make_unique<lcad::InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block,
+                                                        lcad::Point2D(0, 0)));
+    doc.addEntity(std::make_unique<lcad::WireEntity>(
+        doc.reserveEntityId(), doc.currentLayer(), std::vector<lcad::Point2D>{lcad::Point2D(10, 0), lcad::Point2D(30, 0)}));
+    doc.addEntity(std::make_unique<lcad::JunctionEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(20, 5)));
+    doc.addEntity(std::make_unique<lcad::NoConnectEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(0, 0)));
+    doc.addEntity(
+        std::make_unique<lcad::NetLabelEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(30, 0), "VCC"));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const lcad::BlockDefinition* loadedBlock = loaded.findBlock("R");
+    REQUIRE(loadedBlock);
+    REQUIRE(loadedBlock->isSymbol());
+    REQUIRE(loadedBlock->pins.size() == 2);
+    REQUIRE(loadedBlock->pins[0].name == "1");
+    REQUIRE(loadedBlock->pins[0].number == "1");
+    REQUIRE(loadedBlock->pins[0].electricalType == lcad::PinElectricalType::Passive);
+    REQUIRE(loadedBlock->pins[0].position.x == Approx(0.0));
+    REQUIRE(loadedBlock->pins[0].stubStart.x == Approx(-5.0));
+    REQUIRE(loadedBlock->pins[1].electricalType == lcad::PinElectricalType::Power);
+    REQUIRE(loadedBlock->pins[1].position.x == Approx(10.0));
+
+    bool foundWire = false, foundJunction = false, foundNoConnect = false, foundNetLabel = false;
+    for (const lcad::Entity* e : loaded.entities()) {
+        switch (e->type()) {
+        case lcad::EntityType::Wire: {
+            const auto* wire = static_cast<const lcad::WireEntity*>(e);
+            REQUIRE(wire->vertices().size() == 2);
+            REQUIRE(wire->vertices()[1].x == Approx(30.0));
+            foundWire = true;
+            break;
+        }
+        case lcad::EntityType::Junction: {
+            const auto* junction = static_cast<const lcad::JunctionEntity*>(e);
+            REQUIRE(junction->position().y == Approx(5.0));
+            foundJunction = true;
+            break;
+        }
+        case lcad::EntityType::NoConnect:
+            foundNoConnect = true;
+            break;
+        case lcad::EntityType::NetLabel: {
+            const auto* label = static_cast<const lcad::NetLabelEntity*>(e);
+            REQUIRE(label->name() == "VCC");
+            foundNetLabel = true;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    REQUIRE(foundWire);
+    REQUIRE(foundJunction);
+    REQUIRE(foundNoConnect);
+    REQUIRE(foundNetLabel);
+}
+
+TEST_CASE("DXF round-trips PCB footprint pads, tracks, and vias", "[dxf][pcb]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addBlock("R_FP", {});
+    lcad::BlockDefinition* block = doc.findBlock("R_FP");
+    block->pads.push_back(lcad::Pad{"1", lcad::PadShape::Rect, lcad::Point2D(0, 0), 1.5, 1.5, 0.0});
+    block->pads.push_back(lcad::Pad{"2", lcad::PadShape::Round, lcad::Point2D(10, 0), 1.6, 1.6, 0.8});
+
+    doc.addEntity(std::make_unique<lcad::InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block,
+                                                        lcad::Point2D(0, 0)));
+    doc.addEntity(std::make_unique<lcad::TrackEntity>(
+        doc.reserveEntityId(), doc.currentLayer(), std::vector<lcad::Point2D>{lcad::Point2D(10, 0), lcad::Point2D(30, 0)},
+        0.3));
+    doc.addEntity(std::make_unique<lcad::ViaEntity>(doc.reserveEntityId(), doc.currentLayer(), lcad::Point2D(30, 0),
+                                                    0.6, 0.3));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    const lcad::BlockDefinition* loadedBlock = loaded.findBlock("R_FP");
+    REQUIRE(loadedBlock);
+    REQUIRE(loadedBlock->isFootprint());
+    REQUIRE(loadedBlock->pads.size() == 2);
+    REQUIRE(loadedBlock->pads[0].number == "1");
+    REQUIRE(loadedBlock->pads[0].shape == lcad::PadShape::Rect);
+    REQUIRE(loadedBlock->pads[1].shape == lcad::PadShape::Round);
+    REQUIRE(loadedBlock->pads[1].drillDiameter == Approx(0.8));
+
+    bool foundTrack = false, foundVia = false;
+    for (const lcad::Entity* e : loaded.entities()) {
+        if (e->type() == lcad::EntityType::Track) {
+            const auto* track = static_cast<const lcad::TrackEntity*>(e);
+            REQUIRE(track->vertices().size() == 2);
+            REQUIRE(track->width() == Approx(0.3));
+            foundTrack = true;
+        } else if (e->type() == lcad::EntityType::Via) {
+            const auto* via = static_cast<const lcad::ViaEntity*>(e);
+            REQUIRE(via->diameter() == Approx(0.6));
+            REQUIRE(via->drillDiameter() == Approx(0.3));
+            foundVia = true;
+        }
+    }
+    REQUIRE(foundTrack);
+    REQUIRE(foundVia);
 }

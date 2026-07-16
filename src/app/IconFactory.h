@@ -34,4 +34,12 @@ QIcon eraseIcon();
 // taskbar isn't guaranteed to be dark.
 QIcon appIcon();
 
+// Larger glyphs for the welcome screen's mode-picker cards. Drawn at a
+// bigger canvas than the toolbar icons above so they stay crisp at
+// card size instead of being upscaled.
+QIcon mode2DIcon();
+QIcon mode3DIcon();
+QIcon modePcbIcon();
+QIcon modeOtherIcon();
+
 } // namespace IconFactory

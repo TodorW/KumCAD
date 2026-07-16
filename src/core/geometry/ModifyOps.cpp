@@ -7,12 +7,16 @@
 #include "core/geometry/Ellipse.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MText.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Via.h"
 
 #include <algorithm>
 #include <cmath>
@@ -117,6 +121,14 @@ std::unique_ptr<Entity> stretchedClone(const Entity& e, const BoundingBox& windo
         return translateIfInside(e, static_cast<const ImageEntity&>(e).position(), window, delta);
     case EntityType::PointCloud:
         return translateIfInside(e, static_cast<const PointCloudEntity&>(e).boundingBox().min, window, delta);
+    case EntityType::Junction:
+        return translateIfInside(e, static_cast<const JunctionEntity&>(e).position(), window, delta);
+    case EntityType::NoConnect:
+        return translateIfInside(e, static_cast<const NoConnectEntity&>(e).position(), window, delta);
+    case EntityType::NetLabel:
+        return translateIfInside(e, static_cast<const NetLabelEntity&>(e).position(), window, delta);
+    case EntityType::Via:
+        return translateIfInside(e, static_cast<const ViaEntity&>(e).position(), window, delta);
     case EntityType::Polyline:
     case EntityType::Spline:
     case EntityType::Hatch:
@@ -124,6 +136,8 @@ std::unique_ptr<Entity> stretchedClone(const Entity& e, const BoundingBox& windo
     case EntityType::MLeader:
     case EntityType::Dimension:
     case EntityType::Table:
+    case EntityType::Wire:
+    case EntityType::Track:
         return stretchByGrips(e, window, delta);
     }
     return nullptr;

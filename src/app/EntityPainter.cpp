@@ -9,6 +9,9 @@
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -19,6 +22,9 @@
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/geometry/Wire.h"
 #include "core/document/Document.h"
 
 #include <QFont>
@@ -515,6 +521,38 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         for (const auto& child : insert.instantiate()) {
             paint(painter, *child, toScreen, scale, color, penWidth, linetype, ltScale, document);
         }
+        // Schematic symbols (see BlockDefinition::pins) also draw each pin's
+        // stub and name/number -- pins aren't block child entities, so they
+        // never appear in instantiate() above.
+        if (insert.block() && insert.block()->isSymbol()) {
+            QFont font = painter.font();
+            font.setPixelSize(std::max(1, static_cast<int>(std::round(2.5 * scale))));
+            painter.save();
+            painter.setFont(font);
+            painter.setPen(QPen(color, penWidth));
+            for (const auto& pinWorld : insert.pinWorldPositions()) {
+                const QPointF stubStart = toScreen(pinWorld.stubStart);
+                const QPointF attach = toScreen(pinWorld.attach);
+                painter.drawLine(stubStart, attach);
+                painter.drawText(stubStart, QString::fromStdString(pinWorld.pin->name + " " + pinWorld.pin->number));
+            }
+            painter.restore();
+        }
+        // PCB footprints (see BlockDefinition::pads) draw each pad as a
+        // small filled marker -- pads aren't block child entities either.
+        if (insert.block() && insert.block()->isFootprint()) {
+            painter.save();
+            painter.setBrush(color);
+            for (const auto& padWorld : insert.padWorldPositions()) {
+                const QPointF s = toScreen(padWorld.position);
+                const double w = std::max(2.0, padWorld.pad->width * scale / 2.0);
+                const double h = std::max(2.0, padWorld.pad->height * scale / 2.0);
+                if (padWorld.pad->shape == lcad::PadShape::Round) painter.drawEllipse(s, w, h);
+                else painter.drawRect(QRectF(s.x() - w, s.y() - h, 2 * w, 2 * h));
+            }
+            painter.setBrush(Qt::NoBrush);
+            painter.restore();
+        }
         break;
     }
     case lcad::EntityType::Point: {
@@ -560,6 +598,66 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         painter.translate(toScreen(attdef.position()));
         painter.rotate(-qRadiansToDegrees(attdef.rotation()));
         painter.drawText(QPointF(0, 0), QString::fromStdString(attdef.tag()));
+        painter.restore();
+        break;
+    }
+    case lcad::EntityType::Wire: {
+        const auto& wire = static_cast<const lcad::WireEntity&>(entity);
+        const auto& verts = wire.vertices();
+        for (std::size_t i = 0; i + 1 < verts.size(); ++i) {
+            painter.drawLine(toScreen(verts[i]), toScreen(verts[i + 1]));
+        }
+        break;
+    }
+    case lcad::EntityType::Junction: {
+        const auto& junction = static_cast<const lcad::JunctionEntity&>(entity);
+        const QPointF s = toScreen(junction.position());
+        painter.setBrush(color);
+        painter.drawEllipse(s, 3.0, 3.0);
+        painter.setBrush(Qt::NoBrush);
+        break;
+    }
+    case lcad::EntityType::NoConnect: {
+        const auto& noConnect = static_cast<const lcad::NoConnectEntity&>(entity);
+        const QPointF s = toScreen(noConnect.position());
+        constexpr double half = 3.0;
+        painter.drawLine(QPointF(s.x() - half, s.y() - half), QPointF(s.x() + half, s.y() + half));
+        painter.drawLine(QPointF(s.x() - half, s.y() + half), QPointF(s.x() + half, s.y() - half));
+        break;
+    }
+    case lcad::EntityType::NetLabel: {
+        const auto& label = static_cast<const lcad::NetLabelEntity&>(entity);
+        QFont font = painter.font();
+        font.setPixelSize(std::max(1, static_cast<int>(std::round(label.height() * scale))));
+        painter.save();
+        painter.setFont(font);
+        painter.drawText(toScreen(label.position()), QString::fromStdString(label.name()));
+        painter.restore();
+        break;
+    }
+    case lcad::EntityType::Track: {
+        const auto& track = static_cast<const lcad::TrackEntity&>(entity);
+        const auto& verts = track.vertices();
+        QPen pen(color, std::max(1.0, track.width() * scale));
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.save();
+        painter.setPen(pen);
+        for (std::size_t i = 0; i + 1 < verts.size(); ++i) painter.drawLine(toScreen(verts[i]), toScreen(verts[i + 1]));
+        painter.restore();
+        break;
+    }
+    case lcad::EntityType::Via: {
+        const auto& via = static_cast<const lcad::ViaEntity&>(entity);
+        const QPointF s = toScreen(via.position());
+        const double outerR = std::max(2.0, via.diameter() * scale / 2.0);
+        const double drillR = std::max(1.0, via.drillDiameter() * scale / 2.0);
+        painter.save();
+        painter.setBrush(color);
+        painter.drawEllipse(s, outerR, outerR);
+        painter.setBrush(Qt::black);
+        painter.drawEllipse(s, drillR, drillR);
+        painter.setBrush(Qt::NoBrush);
         painter.restore();
         break;
     }

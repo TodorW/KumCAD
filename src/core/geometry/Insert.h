@@ -55,6 +55,25 @@ public:
     // then translate) -- what rendering, hit-testing, and explode all share.
     std::vector<std::unique_ptr<Entity>> instantiate() const;
 
+    // One of the block's pins transformed into world space, both endpoints
+    // of its stub (Pin::stubStart -> attach) transformed by the same
+    // scale/rotate/translate order as instantiate().
+    struct PinWorld {
+        const Pin* pin;
+        Point2D attach;
+        Point2D stubStart;
+    };
+    // Empty for non-symbol blocks (see BlockDefinition::pins).
+    std::vector<PinWorld> pinWorldPositions() const;
+
+    // Same idea as pinWorldPositions(), for a footprint's pads (see
+    // BlockDefinition::pads). Empty for non-footprint blocks.
+    struct PadWorld {
+        const Pad* pad;
+        Point2D position;
+    };
+    std::vector<PadWorld> padWorldPositions() const;
+
     EntityType type() const override { return EntityType::Insert; }
     BoundingBox boundingBox() const override;
     double distanceTo(const Point2D& pt) const override;

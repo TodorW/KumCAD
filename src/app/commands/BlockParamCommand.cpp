@@ -164,6 +164,12 @@ QString shortEntityTypeName(lcad::EntityType type) {
     case lcad::EntityType::Table: return QStringLiteral("Table");
     case lcad::EntityType::Image: return QStringLiteral("Image");
     case lcad::EntityType::PointCloud: return QStringLiteral("PointCloud");
+    case lcad::EntityType::Wire: return QStringLiteral("Wire");
+    case lcad::EntityType::Junction: return QStringLiteral("Junction");
+    case lcad::EntityType::NoConnect: return QStringLiteral("NoConnect");
+    case lcad::EntityType::NetLabel: return QStringLiteral("NetLabel");
+    case lcad::EntityType::Track: return QStringLiteral("Track");
+    case lcad::EntityType::Via: return QStringLiteral("Via");
     }
     return QStringLiteral("Entity");
 }

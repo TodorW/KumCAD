@@ -1,5 +1,6 @@
 #include "IconFactory.h"
 #include "MainWindow.h"
+#include "WelcomeScreen.h"
 
 #include <QApplication>
 #include <QPalette>
@@ -41,11 +42,18 @@ void applyDarkTheme(QApplication& app) {
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    QApplication::setOrganizationName(QStringLiteral("KumCAD"));
     QApplication::setApplicationName(QStringLiteral("KumCAD"));
     app.setWindowIcon(IconFactory::appIcon());
     applyDarkTheme(app);
 
+    WelcomeScreen welcome;
+    if (welcome.exec() != QDialog::Accepted) return 0;
+
     MainWindow window;
+    if (welcome.choice() == WelcomeScreen::Choice::OpenExisting) {
+        window.openSheet(welcome.selectedPath(), QString());
+    }
     window.show();
 
     return app.exec();

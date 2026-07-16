@@ -51,6 +51,50 @@ add_library(lcad_core STATIC
     geometry/Image.cpp
     geometry/PointCloud.h
     geometry/PointCloud.cpp
+    geometry/Wire.h
+    geometry/Wire.cpp
+    geometry/Junction.h
+    geometry/NoConnect.h
+    geometry/NetLabel.h
+    geometry/Track.h
+    geometry/Track.cpp
+    geometry/Via.h
+    schematic/Netlist.h
+    schematic/Netlist.cpp
+    schematic/Erc.h
+    schematic/Erc.cpp
+    schematic/SymbolLibrary.h
+    schematic/SymbolLibrary.cpp
+    pcb/Ratsnest.h
+    pcb/Ratsnest.cpp
+    pcb/Drc.h
+    pcb/Drc.cpp
+    pcb/GerberWriter.h
+    pcb/GerberWriter.cpp
+    electrical/ElectricalLibrary.h
+    electrical/ElectricalLibrary.cpp
+    electrical/WireNumbering.h
+    electrical/WireNumbering.cpp
+    electrical/WireList.h
+    electrical/WireList.cpp
+    pid/PidLibrary.h
+    pid/PidLibrary.cpp
+    pid/InstrumentTagging.h
+    pid/InstrumentTagging.cpp
+    civil/SurveyPoints.h
+    civil/SurveyPoints.cpp
+    civil/Tin.h
+    civil/Tin.cpp
+    civil/Contours.h
+    civil/Contours.cpp
+    civil/CutFill.h
+    civil/CutFill.cpp
+    civil/Alignment.h
+    civil/Alignment.cpp
+    cam/Toolpath.h
+    cam/Toolpath.cpp
+    cam/GCodeWriter.h
+    cam/GCodeWriter.cpp
     util/Expr.h
     util/Expr.cpp
     lisp/LispInterpreter.h

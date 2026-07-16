@@ -9,6 +9,9 @@
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
@@ -19,6 +22,9 @@
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/geometry/Wire.h"
 #include "core/io/DxfColors.h"
 
 #include <cmath>
@@ -487,6 +493,68 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         writeGroup(out, 70, 0);
         break;
     }
+    case EntityType::Wire: {
+        // Custom entity name, like POINTCLOUD -- a real DXF reader ignores
+        // unrecognized group-0 names, so this round-trips within KumCAD
+        // without corrupting the file for anything else that opens it.
+        const auto& wire = static_cast<const WireEntity&>(e);
+        writeGroup(out, 0, "WIRE");
+        writeCommon(out, document, e);
+        writeGroup(out, 90, static_cast<int>(wire.vertices().size()));
+        for (const Point2D& v : wire.vertices()) {
+            writeGroup(out, 10, v.x);
+            writeGroup(out, 20, v.y);
+        }
+        break;
+    }
+    case EntityType::Junction: {
+        const auto& junction = static_cast<const JunctionEntity&>(e);
+        writeGroup(out, 0, "JUNCTION");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, junction.position().x);
+        writeGroup(out, 20, junction.position().y);
+        break;
+    }
+    case EntityType::NoConnect: {
+        const auto& noConnect = static_cast<const NoConnectEntity&>(e);
+        writeGroup(out, 0, "NOCONNECT");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, noConnect.position().x);
+        writeGroup(out, 20, noConnect.position().y);
+        break;
+    }
+    case EntityType::NetLabel: {
+        const auto& label = static_cast<const NetLabelEntity&>(e);
+        writeGroup(out, 0, "NETLABEL");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, label.position().x);
+        writeGroup(out, 20, label.position().y);
+        writeGroup(out, 40, label.height());
+        writeGroup(out, 1, label.name());
+        break;
+    }
+    case EntityType::Track: {
+        const auto& track = static_cast<const TrackEntity&>(e);
+        writeGroup(out, 0, "TRACK");
+        writeCommon(out, document, e);
+        writeGroup(out, 40, track.width());
+        writeGroup(out, 90, static_cast<int>(track.vertices().size()));
+        for (const Point2D& v : track.vertices()) {
+            writeGroup(out, 10, v.x);
+            writeGroup(out, 20, v.y);
+        }
+        break;
+    }
+    case EntityType::Via: {
+        const auto& via = static_cast<const ViaEntity&>(e);
+        writeGroup(out, 0, "VIA");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, via.position().x);
+        writeGroup(out, 20, via.position().y);
+        writeGroup(out, 40, via.diameter());
+        writeGroup(out, 41, via.drillDiameter());
+        break;
+    }
     }
 }
 
@@ -725,6 +793,32 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
                         }
                     }
                 }
+            }
+            // Schematic-symbol pins (see BlockDefinition::pins): each pin
+            // writes its 7 fields adjacently (name, number, electrical type,
+            // position.x/y, stub-start.x/y) on group codes unused elsewhere
+            // in a BLOCK header, zipped back by the reader the same way
+            // dynamicLookup's label/factor pairs are.
+            for (const Pin& pin : block->pins) {
+                writeGroup(out, 7, pin.name);
+                writeGroup(out, 9, pin.number);
+                writeGroup(out, 71, static_cast<int>(pin.electricalType));
+                writeGroup(out, 91, pin.position.x);
+                writeGroup(out, 92, pin.position.y);
+                writeGroup(out, 93, pin.stubStart.x);
+                writeGroup(out, 94, pin.stubStart.y);
+            }
+            // PCB footprint pads (see BlockDefinition::pads), same
+            // adjacent-fields-per-item convention as pins above, on group
+            // codes unused by anything else in a BLOCK header.
+            for (const Pad& pad : block->pads) {
+                writeGroup(out, 63, pad.number);
+                writeGroup(out, 72, static_cast<int>(pad.shape));
+                writeGroup(out, 95, pad.position.x);
+                writeGroup(out, 96, pad.position.y);
+                writeGroup(out, 97, pad.width);
+                writeGroup(out, 98, pad.height);
+                writeGroup(out, 99, pad.drillDiameter);
             }
             for (const auto& child : block->entities) writeEntity(out, document, *child);
             writeGroup(out, 0, "ENDBLK");

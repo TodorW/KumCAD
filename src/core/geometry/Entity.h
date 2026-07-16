@@ -33,6 +33,12 @@ enum class EntityType {
     Table,            // TABLE grid of cell text
     Image,            // IMAGE raster underlay
     PointCloud,       // POINTCLOUD scan point set
+    Wire,             // schematic electrical connection (KiCad-style)
+    Junction,         // dot marking a real T/cross connection between wires
+    NoConnect,        // X mark on an intentionally-unconnected pin
+    NetLabel,         // named net tag touching a wire
+    Track,            // PCB copper trace
+    Via,              // PCB drilled through-layer connection
 };
 
 // Object-snap candidate kinds, mirroring AutoCAD's OSNAP markers. The first

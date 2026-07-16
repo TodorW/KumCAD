@@ -9,18 +9,24 @@
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/AttDef.h"
 #include "core/geometry/ConstructionLine.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/geometry/Wire.h"
 
 #include <QColorDialog>
 #include <QComboBox>
@@ -463,6 +469,46 @@ void PropertiesPanel::refresh() {
         addRow(QStringLiteral("Position Y:"), formatNumber(table->position().y));
         addRow(QStringLiteral("Rows:"), QString::number(table->rows()));
         addRow(QStringLiteral("Columns:"), QString::number(table->cols()));
+        break;
+    }
+    case lcad::EntityType::Wire: {
+        const auto* wire = static_cast<const lcad::WireEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Wire"));
+        addRow(QStringLiteral("Vertices:"), QString::number(wire->vertices().size()));
+        break;
+    }
+    case lcad::EntityType::Junction: {
+        const auto* junction = static_cast<const lcad::JunctionEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Junction"));
+        addRow(QStringLiteral("Position X:"), formatNumber(junction->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(junction->position().y));
+        break;
+    }
+    case lcad::EntityType::NoConnect: {
+        const auto* noConnect = static_cast<const lcad::NoConnectEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("No Connect"));
+        addRow(QStringLiteral("Position X:"), formatNumber(noConnect->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(noConnect->position().y));
+        break;
+    }
+    case lcad::EntityType::NetLabel: {
+        const auto* label = static_cast<const lcad::NetLabelEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Net Label"));
+        addRow(QStringLiteral("Name:"), QString::fromStdString(label->name()));
+        break;
+    }
+    case lcad::EntityType::Track: {
+        const auto* track = static_cast<const lcad::TrackEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Track"));
+        addRow(QStringLiteral("Vertices:"), QString::number(track->vertices().size()));
+        addRow(QStringLiteral("Width:"), formatNumber(track->width()));
+        break;
+    }
+    case lcad::EntityType::Via: {
+        const auto* via = static_cast<const lcad::ViaEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Via"));
+        addRow(QStringLiteral("Diameter:"), formatNumber(via->diameter()));
+        addRow(QStringLiteral("Drill:"), formatNumber(via->drillDiameter()));
         break;
     }
     }

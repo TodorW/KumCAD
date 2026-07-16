@@ -21,6 +21,10 @@ add_executable(kumcad WIN32
     CommandDispatcher.cpp
     IconFactory.h
     IconFactory.cpp
+    RecentFiles.h
+    RecentFiles.cpp
+    WelcomeScreen.h
+    WelcomeScreen.cpp
     CommandAliases.h
     CommandAliases.cpp
     CommandAliasDialog.h
@@ -171,6 +175,16 @@ add_executable(kumcad WIN32
     commands/MLeaderCommand.cpp
     commands/MLeaderStyleCommand.h
     commands/MLeaderStyleCommand.cpp
+    commands/WireCommand.h
+    commands/WireCommand.cpp
+    commands/SchematicCommands.h
+    commands/SchematicCommands.cpp
+    commands/PcbCommands.h
+    commands/PcbCommands.cpp
+    commands/CivilCommands.h
+    commands/CivilCommands.cpp
+    commands/CamCommands.h
+    commands/CamCommands.cpp
 )
 
 target_include_directories(kumcad PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

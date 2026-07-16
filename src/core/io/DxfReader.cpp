@@ -9,6 +9,9 @@
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/Junction.h"
+#include "core/geometry/NetLabel.h"
+#include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/io/PointCloudFile.h"
 #include "core/geometry/Leader.h"
@@ -20,6 +23,9 @@
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Track.h"
+#include "core/geometry/Via.h"
+#include "core/geometry/Wire.h"
 #include "core/io/DxfColors.h"
 
 #include <algorithm>
@@ -196,6 +202,20 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::string curBlockPendingLookupLabel;
     std::vector<std::string> curBlockVisibilityStates;             // group 5
     std::vector<std::vector<int>> curBlockVisibilityIndices;       // group 74, appended to the last state
+    std::vector<Pin> curBlockPins; // groups 7/9/71/91-94, zipped per pin like the lookup presets above
+    std::string curBlockPendingPinName;
+    std::string curBlockPendingPinNumber;
+    int curBlockPendingPinType = 0;
+    double curBlockPendingPinPosX = 0.0;
+    double curBlockPendingPinPosY = 0.0;
+    double curBlockPendingPinStubX = 0.0;
+    std::vector<Pad> curBlockPads; // groups 63/72/95-99, zipped per pad
+    std::string curBlockPendingPadNumber;
+    int curBlockPendingPadShape = 0;
+    double curBlockPendingPadPosX = 0.0;
+    double curBlockPendingPadPosY = 0.0;
+    double curBlockPendingPadWidth = 0.0;
+    double curBlockPendingPadHeight = 0.0;
     std::vector<std::unique_ptr<Entity>> curBlockEntities;
     int curPaperIndex = -1; // >= 0 while inside a *Paper_Space block
 
@@ -231,6 +251,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             curBlockPendingLookupLabel.clear();
             curBlockVisibilityStates.clear();
             curBlockVisibilityIndices.clear();
+            curBlockPins.clear();
+            curBlockPads.clear();
             return;
         }
         // Normalize child geometry to be base-point-relative.
@@ -286,6 +308,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 }
                 newBlock->dynamicVisibility = vp;
             }
+            newBlock->pins = curBlockPins;
+            newBlock->pads = curBlockPads;
         }
         curBlockEntities.clear();
         curBlockName.clear();
@@ -300,6 +324,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         curBlockVisibilityStates.clear();
         curBlockVisibilityIndices.clear();
         curBlockDynamicValues.clear();
+        curBlockPins.clear();
+        curBlockPads.clear();
     };
 
     std::string curEntityType;
@@ -366,6 +392,11 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::vector<int> mleaderLegSizes;   // one entry per leg, in order (group 70)
     double pendingLegX = 0.0;
     bool havePendingLegX = false;
+    std::string netLabelName;  // NETLABEL group 1
+    double netLabelHeight = 0.0; // NETLABEL group 40
+    double trackWidth = 0.0;      // TRACK group 40
+    double viaDiameter = 0.0;     // VIA group 40
+    double viaDrillDiameter = 0.0; // VIA group 41
     // The INSERT most recently flushed, so following ATTRIB records can
     // attach their values to it. Cleared by any non-ATTRIB entity.
     InsertEntity* lastInsert = nullptr;
@@ -529,6 +560,20 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 legs.push_back(std::move(leg));
             }
             made = std::make_unique<MLeaderEntity>(id, layerId, legs, p10, mleaderArrowSize);
+        } else if (curEntityType == "WIRE" && polyVerts.size() >= 2) {
+            made = std::make_unique<WireEntity>(id, layerId, polyVerts);
+        } else if (curEntityType == "JUNCTION") {
+            made = std::make_unique<JunctionEntity>(id, layerId, p10);
+        } else if (curEntityType == "NOCONNECT") {
+            made = std::make_unique<NoConnectEntity>(id, layerId, p10);
+        } else if (curEntityType == "NETLABEL" && !netLabelName.empty()) {
+            made = std::make_unique<NetLabelEntity>(id, layerId, p10, netLabelName,
+                                                    netLabelHeight > 1e-9 ? netLabelHeight : 2.5);
+        } else if (curEntityType == "TRACK" && polyVerts.size() >= 2) {
+            made = std::make_unique<TrackEntity>(id, layerId, polyVerts, trackWidth > 1e-9 ? trackWidth : 0.25);
+        } else if (curEntityType == "VIA") {
+            made = std::make_unique<ViaEntity>(id, layerId, p10, viaDiameter > 1e-9 ? viaDiameter : 0.6,
+                                               viaDrillDiameter > 1e-9 ? viaDrillDiameter : 0.3);
         }
 
         const bool madeSomething = made != nullptr;
@@ -621,6 +666,11 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         mleaderPoints.clear();
         mleaderLegSizes.clear();
         havePendingLegX = false;
+        netLabelName.clear();
+        netLabelHeight = 0.0;
+        trackWidth = 0.0;
+        viaDiameter = 0.0;
+        viaDrillDiameter = 0.0;
     };
 
     for (const Group& g : groups) {
@@ -891,6 +941,47 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curBlockVisibilityIndices.emplace_back();
             } else if (g.code == 74 && !curBlockVisibilityIndices.empty()) {
                 curBlockVisibilityIndices.back().push_back(toInt(g.value));
+            } else if (g.code == 7) {
+                curBlockPendingPinName = g.value;
+            } else if (g.code == 9) {
+                curBlockPendingPinNumber = g.value;
+            } else if (g.code == 71) {
+                curBlockPendingPinType = toInt(g.value, 0);
+            } else if (g.code == 91) {
+                curBlockPendingPinPosX = toDouble(g.value);
+            } else if (g.code == 92) {
+                curBlockPendingPinPosY = toDouble(g.value);
+            } else if (g.code == 93) {
+                curBlockPendingPinStubX = toDouble(g.value);
+            } else if (g.code == 94) {
+                Pin pin;
+                pin.name = curBlockPendingPinName;
+                pin.number = curBlockPendingPinNumber;
+                pin.electricalType = static_cast<PinElectricalType>(curBlockPendingPinType);
+                pin.position = Point2D(curBlockPendingPinPosX, curBlockPendingPinPosY);
+                pin.stubStart = Point2D(curBlockPendingPinStubX, toDouble(g.value));
+                curBlockPins.push_back(pin);
+            } else if (g.code == 63) {
+                curBlockPendingPadNumber = g.value;
+            } else if (g.code == 72) {
+                curBlockPendingPadShape = toInt(g.value, 0);
+            } else if (g.code == 95) {
+                curBlockPendingPadPosX = toDouble(g.value);
+            } else if (g.code == 96) {
+                curBlockPendingPadPosY = toDouble(g.value);
+            } else if (g.code == 97) {
+                curBlockPendingPadWidth = toDouble(g.value);
+            } else if (g.code == 98) {
+                curBlockPendingPadHeight = toDouble(g.value);
+            } else if (g.code == 99) {
+                Pad pad;
+                pad.number = curBlockPendingPadNumber;
+                pad.shape = static_cast<PadShape>(curBlockPendingPadShape);
+                pad.position = Point2D(curBlockPendingPadPosX, curBlockPendingPadPosY);
+                pad.width = curBlockPendingPadWidth;
+                pad.height = curBlockPendingPadHeight;
+                pad.drillDiameter = toDouble(g.value);
+                curBlockPads.push_back(pad);
             }
             continue;
         }
@@ -908,7 +999,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             curLayerRef = g.value;
             break;
         case 10:
-            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" || inVertex) {
+            if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" ||
+                curEntityType == "WIRE" || curEntityType == "TRACK" || inVertex) {
                 pendingVertX = toDouble(g.value);
                 havePendingVertX = true;
             } else if (curEntityType == "HATCH") {
@@ -922,7 +1014,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             break;
         case 20:
             if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" || inVertex ||
-                curEntityType == "HATCH") {
+                curEntityType == "HATCH" || curEntityType == "WIRE" || curEntityType == "TRACK") {
                 if (havePendingVertX) {
                     polyVerts.emplace_back(pendingVertX, toDouble(g.value));
                     polyBulges.push_back(0.0); // a following group 42 may overwrite this
@@ -986,6 +1078,9 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "ACAD_TABLE") tableTextHeight = toDouble(g.value, 2.5);
             else if (curEntityType == "MULTILEADER") mleaderArrowSize = toDouble(g.value, 1.25);
             else if (curEntityType == "IMAGE") imageWidth = toDouble(g.value);
+            else if (curEntityType == "NETLABEL") netLabelHeight = toDouble(g.value, 2.5);
+            else if (curEntityType == "TRACK") trackWidth = toDouble(g.value, 0.25);
+            else if (curEntityType == "VIA") viaDiameter = toDouble(g.value, 0.6);
             else radius = toDouble(g.value);
             break;
         case 41:
@@ -994,6 +1089,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "MTEXT") mtextWidth = toDouble(g.value);
             else if (curEntityType == "VIEWPORT") vpHeight = toDouble(g.value);
             else if (curEntityType == "IMAGE") imageHeight = toDouble(g.value);
+            else if (curEntityType == "VIA") viaDrillDiameter = toDouble(g.value, 0.3);
             break;
         case 12:
             if (curEntityType == "VIEWPORT") vpViewCenter.x = toDouble(g.value);
@@ -1084,6 +1180,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "ACAD_TABLE") tableCells.push_back(g.value);
             else if (curEntityType == "IMAGE") imagePath = g.value;
             else if (curEntityType == "POINTCLOUD") pointCloudPath = g.value;
+            else if (curEntityType == "NETLABEL") netLabelName = g.value;
             break;
         case 3:
             if (curEntityType == "MTEXT") mtextChunks += g.value;

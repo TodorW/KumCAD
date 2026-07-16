@@ -13,6 +13,7 @@
 #include "DesignCenterPanel.h"
 #include "MarkupSetPanel.h"
 #include "PrintRenderer.h"
+#include "RecentFiles.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/PointCloud.h"
 #include "core/io/DwgReader.h"
@@ -21,6 +22,9 @@
 #include "core/io/DxfWriter.h"
 #include "core/io/Xref.h"
 #include "core/io/Zip.h"
+#include "core/electrical/ElectricalLibrary.h"
+#include "core/pid/PidLibrary.h"
+#include "core/schematic/SymbolLibrary.h"
 
 #include <QAction>
 #include <QCloseEvent>
@@ -49,6 +53,9 @@
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     resize(1280, 800);
 
+    lcad::registerBuiltinSymbols(m_document);
+    lcad::registerElectricalSymbols(m_document);
+    lcad::registerPidSymbols(m_document);
     m_view = new DrawingView(m_document, this);
 
     // Model/layout tabs under the canvas, like AutoCAD's space tabs.
@@ -405,6 +412,9 @@ void MainWindow::newDocument() {
     if (!confirmDiscardUnsavedChanges()) return;
 
     m_document = lcad::Document();
+    lcad::registerBuiltinSymbols(m_document);
+    lcad::registerElectricalSymbols(m_document);
+    lcad::registerPidSymbols(m_document);
     m_view->resetViewState();
     m_layerPanel->refresh();
     m_propertiesPanel->refresh();
@@ -437,6 +447,9 @@ bool MainWindow::loadFromPath(const QString& path) {
         return false;
     }
 
+    lcad::registerBuiltinSymbols(m_document);
+    lcad::registerElectricalSymbols(m_document);
+    lcad::registerPidSymbols(m_document);
     const int refreshedXrefs = lcad::reloadAllXrefs(m_document, QFileInfo(path).absolutePath().toStdString());
     if (refreshedXrefs > 0) {
         statusBar()->showMessage(QStringLiteral("Refreshed %1 xref(s) from disk").arg(refreshedXrefs), 4000);
@@ -452,6 +465,7 @@ bool MainWindow::loadFromPath(const QString& path) {
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Opened %1").arg(QFileInfo(path).fileName()), 3000);
+    RecentFiles::add(path);
     return true;
 }
 
@@ -626,5 +640,6 @@ bool MainWindow::saveDocumentAs() {
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Saved %1").arg(QFileInfo(m_currentFilePath).fileName()), 3000);
+    RecentFiles::add(m_currentFilePath);
     return true;
 }

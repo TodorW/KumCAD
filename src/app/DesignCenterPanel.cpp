@@ -116,6 +116,10 @@ void DesignCenterPanel::importBlock(const std::string& name) {
         copies.push_back(std::move(copy));
     }
     m_document.addBlock(targetName, std::move(copies));
+    // Pins turn a block into a schematic symbol (see BlockDefinition::pins);
+    // carry them over so imported symbols stay wireable in the target
+    // document, not just their body geometry.
+    if (lcad::BlockDefinition* target = m_document.findBlock(targetName)) target->pins = source->pins;
     emit documentImported();
 }
 

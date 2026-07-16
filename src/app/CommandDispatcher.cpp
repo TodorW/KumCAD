@@ -38,6 +38,11 @@
 #include "commands/LengthenCommand.h"
 #include "commands/MLeaderCommand.h"
 #include "commands/MLeaderStyleCommand.h"
+#include "commands/CamCommands.h"
+#include "commands/CivilCommands.h"
+#include "commands/PcbCommands.h"
+#include "commands/SchematicCommands.h"
+#include "commands/WireCommand.h"
 #include "commands/LineCommand.h"
 #include "commands/LtScaleCommand.h"
 #include "commands/LweightCommand.h"
@@ -76,6 +81,11 @@
 #include "core/geometry/Line.h"
 #include "core/geometry/ModifyOps.h"
 #include "core/geometry/Polyline.h"
+#include "core/electrical/WireNumbering.h"
+#include "core/pcb/Drc.h"
+#include "core/pid/InstrumentTagging.h"
+#include "core/schematic/Erc.h"
+#include "core/schematic/Netlist.h"
 
 #include <QClipboard>
 #include <QFile>
@@ -541,6 +551,66 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         undo();
     } else if (cmd == QLatin1String("REDO")) {
         redo();
+    } else if (cmd == QLatin1String("WIRE") || cmd == QLatin1String("W")) {
+        startCommand(std::make_unique<WireCommand>(m_document), QStringLiteral("WIRE"));
+    } else if (cmd == QLatin1String("JUNCTION") || cmd == QLatin1String("J")) {
+        startCommand(std::make_unique<JunctionCommand>(m_document), QStringLiteral("JUNCTION"));
+    } else if (cmd == QLatin1String("NOCONNECT") || cmd == QLatin1String("NC")) {
+        startCommand(std::make_unique<NoConnectCommand>(m_document), QStringLiteral("NOCONNECT"));
+    } else if (cmd == QLatin1String("NETLABEL") || cmd == QLatin1String("LABEL")) {
+        startCommand(std::make_unique<NetLabelCommand>(m_document), QStringLiteral("NETLABEL"));
+    } else if (cmd == QLatin1String("PINADD")) {
+        startCommand(std::make_unique<PinAddCommand>(m_document), QStringLiteral("PINADD"));
+    } else if (cmd == QLatin1String("TRACK")) {
+        startCommand(std::make_unique<TrackCommand>(m_document), QStringLiteral("TRACK"));
+    } else if (cmd == QLatin1String("VIA") || cmd == QLatin1String("V")) {
+        startCommand(std::make_unique<ViaCommand>(m_document), QStringLiteral("VIA"));
+    } else if (cmd == QLatin1String("RATSNEST")) {
+        startCommand(std::make_unique<RatsnestCommand>(m_document), QStringLiteral("RATSNEST"));
+    } else if (cmd == QLatin1String("GERBER")) {
+        startCommand(std::make_unique<GerberExportCommand>(m_document), QStringLiteral("GERBER"));
+    } else if (cmd == QLatin1String("DRILL")) {
+        startCommand(std::make_unique<DrillExportCommand>(m_document), QStringLiteral("DRILL"));
+    } else if (cmd == QLatin1String("PNP")) {
+        startCommand(std::make_unique<PickAndPlaceCommand>(m_document), QStringLiteral("PNP"));
+    } else if (cmd == QLatin1String("GCODE")) {
+        startCommand(std::make_unique<GCodeExportCommand>(m_document, pickTolerance()), QStringLiteral("GCODE"));
+    } else if (cmd == QLatin1String("TIN")) {
+        startCommand(std::make_unique<TinInfoCommand>(m_document), QStringLiteral("TIN"));
+    } else if (cmd == QLatin1String("CONTOUR")) {
+        startCommand(std::make_unique<ContourCommand>(m_document), QStringLiteral("CONTOUR"));
+    } else if (cmd == QLatin1String("CUTFILL")) {
+        startCommand(std::make_unique<CutFillCommand>(m_document), QStringLiteral("CUTFILL"));
+    } else if (cmd == QLatin1String("PROFILE")) {
+        startCommand(std::make_unique<ProfileCommand>(m_document), QStringLiteral("PROFILE"));
+    } else if (cmd == QLatin1String("DRC")) {
+        const std::vector<lcad::DrcViolation> violations = lcad::runDrc(m_document);
+        m_commandLine.appendLine(QStringLiteral("*DRC: %1 violation(s)*").arg(violations.size()));
+        for (const lcad::DrcViolation& v : violations) {
+            m_commandLine.appendLine(QStringLiteral("  %1").arg(QString::fromStdString(v.message)));
+        }
+    } else if (cmd == QLatin1String("ERC")) {
+        const std::vector<lcad::Net> nets = lcad::computeNets(m_document);
+        const std::vector<lcad::ErcIssue> issues = lcad::runErc(m_document, nets);
+        m_commandLine.appendLine(QStringLiteral("*ERC: %1 net(s), %2 issue(s)*").arg(nets.size()).arg(issues.size()));
+        for (const lcad::ErcIssue& issue : issues) {
+            const QString tag = issue.severity == lcad::ErcIssue::Severity::Error
+                                    ? QStringLiteral("Error")
+                                    : QStringLiteral("Warning");
+            m_commandLine.appendLine(QStringLiteral("  [%1] %2").arg(tag, QString::fromStdString(issue.message)));
+        }
+    } else if (cmd == QLatin1String("NETLIST")) {
+        startCommand(std::make_unique<NetlistExportCommand>(m_document), QStringLiteral("NETLIST"));
+    } else if (cmd == QLatin1String("WIRENUM")) {
+        lcad::assignWireNumbers(m_document);
+        m_commandLine.appendLine(QStringLiteral("*Wire numbers assigned*"));
+        emit documentChanged();
+    } else if (cmd == QLatin1String("WIRELIST") || cmd == QLatin1String("LINELIST")) {
+        startCommand(std::make_unique<WireListCommand>(m_document), QStringLiteral("WIRELIST"));
+    } else if (cmd == QLatin1String("TAGINST")) {
+        lcad::assignInstrumentTags(m_document);
+        m_commandLine.appendLine(QStringLiteral("*Instrument tags assigned*"));
+        emit documentChanged();
     } else if (!cmd.isEmpty()) {
         m_commandLine.appendLine(QStringLiteral("*Unknown command \"%1\"*").arg(trimmed));
     }

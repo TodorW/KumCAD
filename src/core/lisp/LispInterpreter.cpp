@@ -228,6 +228,12 @@ const char* dxfTypeName(EntityType type) {
     case EntityType::Table: return "ACAD_TABLE";
     case EntityType::Image: return "IMAGE";
     case EntityType::PointCloud: return "POINTCLOUD";
+    case EntityType::Wire: return "WIRE";
+    case EntityType::Junction: return "JUNCTION";
+    case EntityType::NoConnect: return "NOCONNECT";
+    case EntityType::NetLabel: return "NETLABEL";
+    case EntityType::Track: return "TRACK";
+    case EntityType::Via: return "VIA";
     }
     return "UNKNOWN";
 }

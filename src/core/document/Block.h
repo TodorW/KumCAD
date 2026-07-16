@@ -69,6 +69,48 @@ struct DynamicLookupParameter {
     std::vector<std::pair<std::string, double>> presets;
 };
 
+// A schematic-symbol pin's electrical role, mirroring KiCad's pin electrical
+// types -- used by ERC to flag illegal connections (e.g. two Output pins
+// tied together) once the netlist exists.
+enum class PinElectricalType {
+    Input,
+    Output,
+    Bidirectional,
+    TriState,
+    Passive,
+    Power,
+    OpenCollector,
+    NotConnected,
+};
+
+// One connection point on a schematic symbol. position is the wire
+// attachment point (block-local, like BlockDefinition's other geometry);
+// stubStart is the far end of the drawn pin stub, so the stub segment runs
+// stubStart -> position with the wire/net touching at position.
+struct Pin {
+    std::string name;
+    std::string number;
+    PinElectricalType electricalType = PinElectricalType::Passive;
+    Point2D position;
+    Point2D stubStart;
+};
+
+// A PCB footprint pad's shape.
+enum class PadShape { Round, Rect, Oval };
+
+// One copper connection point on a PCB footprint. number matches the
+// schematic symbol pin number it corresponds to (by convention, like real
+// footprints -- pad 1 is meant to receive the net wired to schematic pin 1).
+// drillDiameter is 0 for a surface-mount pad, > 0 for plated through-hole.
+struct Pad {
+    std::string number;
+    PadShape shape = PadShape::Round;
+    Point2D position;
+    double width = 1.6;
+    double height = 1.6;
+    double drillDiameter = 0.0;
+};
+
 // A reusable group of entities (an AutoCAD block definition). Child geometry
 // is stored relative to the block's base point, i.e. already translated so
 // the base point is the local origin; an InsertEntity places, scales, and
@@ -88,11 +130,22 @@ struct BlockDefinition {
     std::optional<DynamicVisibilityParameter> dynamicVisibility;
     std::optional<DynamicArrayParameter> dynamicArray;
     std::optional<DynamicLookupParameter> dynamicLookup;
+    // Present iff this block is a schematic symbol (KiCad-style): an INSERT
+    // of it becomes a symbol instance whose pins participate in netlist
+    // computation (see core/schematic/Netlist.h). Empty for ordinary
+    // (non-electrical) blocks.
+    std::vector<Pin> pins;
+    // Present iff this block is a PCB footprint: an INSERT of it becomes a
+    // placed component whose pads participate in ratsnest computation (see
+    // core/pcb/Ratsnest.h). A block is never both a symbol and a footprint.
+    std::vector<Pad> pads;
 
     bool isXref() const { return !xrefPath.empty(); }
     bool isDynamic() const {
         return dynamicParam || dynamicFlip || dynamicRotation || dynamicVisibility || dynamicArray || dynamicLookup;
     }
+    bool isSymbol() const { return !pins.empty(); }
+    bool isFootprint() const { return !pads.empty(); }
 };
 
 } // namespace lcad

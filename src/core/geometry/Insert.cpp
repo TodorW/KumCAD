@@ -111,6 +111,33 @@ std::vector<std::unique_ptr<Entity>> InsertEntity::instantiate() const {
     return result;
 }
 
+std::vector<InsertEntity::PinWorld> InsertEntity::pinWorldPositions() const {
+    std::vector<PinWorld> result;
+    if (!m_block) return result;
+    result.reserve(m_block->pins.size());
+    auto transform = [&](const Point2D& local) {
+        Point2D world = scaleAround(local, Point2D(0, 0), m_scale);
+        world = rotateAround(world, Point2D(0, 0), m_rotation);
+        return world + m_position;
+    };
+    for (const Pin& pin : m_block->pins) {
+        result.push_back({&pin, transform(pin.position), transform(pin.stubStart)});
+    }
+    return result;
+}
+
+std::vector<InsertEntity::PadWorld> InsertEntity::padWorldPositions() const {
+    std::vector<PadWorld> result;
+    if (!m_block) return result;
+    result.reserve(m_block->pads.size());
+    for (const Pad& pad : m_block->pads) {
+        Point2D world = scaleAround(pad.position, Point2D(0, 0), m_scale);
+        world = rotateAround(world, Point2D(0, 0), m_rotation);
+        result.push_back({&pad, world + m_position});
+    }
+    return result;
+}
+
 BoundingBox InsertEntity::boundingBox() const {
     BoundingBox box;
     for (const auto& e : instantiate()) box.expand(e->boundingBox());

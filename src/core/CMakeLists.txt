@@ -61,6 +61,7 @@ add_library(lcad_core STATIC
     geometry/Via.h
     schematic/Netlist.h
     schematic/Netlist.cpp
+    schematic/Spice.cpp
     schematic/Erc.h
     schematic/Erc.cpp
     schematic/SymbolLibrary.h

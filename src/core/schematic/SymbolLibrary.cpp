@@ -224,6 +224,38 @@ void registerBuiltinSymbols(Document& doc) {
         addIfMissing(doc, "CONN4", std::move(body), std::move(pins));
     }
 
+    // DC voltage source: a "long plate / short plate" battery glyph.
+    // Simulation-only (see core/schematic/Spice.h) -- deliberately no
+    // matching "_FP" footprint, unlike every part above: a source
+    // represents an external supply or test stimulus, not something that
+    // gets placed and soldered onto a real board.
+    {
+        std::vector<std::unique_ptr<Entity>> body;
+        addLine(doc, body, Point2D(9, -5), Point2D(9, 5));   // + plate (tall)
+        addLine(doc, body, Point2D(11, -3), Point2D(11, 3)); // - plate (short)
+        std::vector<Pin> pins = {
+            Pin{"1", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(9, 0)},  // +
+            Pin{"2", "2", PinElectricalType::Power, Point2D(20, 0), Point2D(11, 0)}, // -
+        };
+        addIfMissing(doc, "V", std::move(body), std::move(pins));
+    }
+
+    // DC current source: a circle with an arrow through it pointing from
+    // pin 1 to pin 2 (conventional current direction). Simulation-only,
+    // same reasoning as V above.
+    {
+        std::vector<std::unique_ptr<Entity>> body;
+        body.push_back(std::make_unique<CircleEntity>(doc.reserveEntityId(), LayerId(0), Point2D(10, 0), 6.0));
+        addLine(doc, body, Point2D(6, 0), Point2D(14, 0));
+        addLine(doc, body, Point2D(14, 0), Point2D(11, 2));
+        addLine(doc, body, Point2D(14, 0), Point2D(11, -2));
+        std::vector<Pin> pins = {
+            Pin{"1", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(4, 0)},
+            Pin{"2", "2", PinElectricalType::Power, Point2D(20, 0), Point2D(16, 0)},
+        };
+        addIfMissing(doc, "I", std::move(body), std::move(pins));
+    }
+
     // A matching PCB footprint for each schematic symbol above (see
     // BlockDefinition::pads) -- named "<Symbol>_FP" so both live in the
     // same document's block table without colliding.

@@ -20,6 +20,7 @@
 #include "commands/DataLinkCommand.h"
 #include "commands/LayerStateCommand.h"
 #include "commands/TCaseCommand.h"
+#include "commands/TranCommand.h"
 #include "commands/ExpressToolCommands.h"
 #include "commands/DimAngularCommand.h"
 #include "commands/DimCommand.h"
@@ -100,6 +101,7 @@
 #include "core/schematic/Erc.h"
 #include "core/schematic/Netlist.h"
 #include "core/schematic/Sheets.h"
+#include "core/schematic/Spice.h"
 
 #include <QClipboard>
 #include <QFile>
@@ -820,6 +822,34 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         }
     } else if (cmd == QLatin1String("NETLIST")) {
         startCommand(std::make_unique<NetlistExportCommand>(m_document), QStringLiteral("NETLIST"));
+    } else if (cmd == QLatin1String("SIM")) {
+        const lcad::CircuitBuildResult built = lcad::buildCircuitFromDocument(m_document);
+        if (built.circuit.elements.empty()) {
+            m_commandLine.appendLine(
+                QStringLiteral("*No simulatable components (R/C/L/V/I/D with REFDES+VALUE) found*"));
+        } else {
+            const lcad::OperatingPointResult op = lcad::solveDcOperatingPoint(built.circuit);
+            if (!op.converged) {
+                m_commandLine.appendLine(QStringLiteral("*DC operating point did not converge*"));
+            } else {
+                m_commandLine.appendLine(QStringLiteral("*SIM: DC operating point*"));
+                for (int n = 1; n <= built.circuit.nodeCount; ++n) {
+                    m_commandLine.appendLine(QStringLiteral("  %1 = %2 V")
+                                                 .arg(QString::fromStdString(built.nodeNames[n]))
+                                                 .arg(op.nodeVoltages[n], 0, 'g', 5));
+                }
+            }
+        }
+        if (!built.skippedRefDes.empty()) {
+            QString skipped;
+            for (const std::string& refDes : built.skippedRefDes) {
+                if (!skipped.isEmpty()) skipped += QStringLiteral(", ");
+                skipped += QString::fromStdString(refDes);
+            }
+            m_commandLine.appendLine(QStringLiteral("*Skipped (no VALUE or unconnected pin): %1*").arg(skipped));
+        }
+    } else if (cmd == QLatin1String("TRAN")) {
+        startCommand(std::make_unique<TranCommand>(m_document), QStringLiteral("TRAN"));
     } else if (cmd == QLatin1String("WIRENUM")) {
         lcad::assignWireNumbers(m_document);
         m_commandLine.appendLine(QStringLiteral("*Wire numbers assigned*"));

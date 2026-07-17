@@ -63,6 +63,16 @@ enum class FeatureType {
                    // a ruled (ThruSections' own default, no interior
                    // smoothing) surface between consecutive profiles'
                    // outer wires
+    Sweep,         // sweeps sketchIndex's face profile along
+                   // pathSketchIndex's own path via BRepOffsetAPI_MakePipe.
+                   // Real, disclosed scope cut: the path must be exactly
+                   // one straight SketchLine, not a multi-segment or
+                   // curved wire -- MakePipe itself requires a G1-
+                   // continuous spine (its own documented limitation),
+                   // and a sharp-cornered polyline isn't one; a real
+                   // multi-segment/curved sweep would need
+                   // BRepOffsetAPI_MakePipeShell's own explicit corner-
+                   // transition modes instead, which this doesn't attempt
     Imported,      // a shape read from an external STEP/IGES file (see
                    // StepIges.h) or loaded back from a .kcad3d's embedded
                    // BRep blob (see Persistence3D.h). Has no parametric
@@ -108,8 +118,13 @@ struct Feature3D {
     int inputB = -1;
     bool cutMode = false; // Pad/Revolve only: true = Pocket/Groove (cut from inputA), false = fuse into inputA
 
-    // Which Document3D::sketches() entry to profile -- Pad/Revolve only.
+    // Which Document3D::sketches() entry to profile -- Pad/Revolve/Sweep
+    // only (for Sweep, the cross-section; the path is pathSketchIndex).
     int sketchIndex = -1;
+
+    // Which Document3D::sketches() entry supplies the sweep path -- Sweep
+    // only.
+    int pathSketchIndex = -1;
 
     // Repeat count (including the original) -- LinearPattern/PolarPattern only.
     int count = 1;

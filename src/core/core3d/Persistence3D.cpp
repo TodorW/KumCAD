@@ -51,7 +51,7 @@ std::string decodeToken(const std::string& s) {
 
 std::string serializeDocument(const Document3D& doc) {
     std::ostringstream out;
-    out << "KCAD3D 3\n";
+    out << "KCAD3D 4\n";
 
     const auto& sketches = doc.sketches();
     out << "SKETCHES " << sketches.size() << "\n";
@@ -86,7 +86,7 @@ std::string serializeDocument(const Document3D& doc) {
         out << f.dirX << " " << f.dirY << " " << f.dirZ << "\n";
         out << f.rotAxisX << " " << f.rotAxisY << " " << f.rotAxisZ << " " << f.rotAngle << "\n";
         out << f.inputA << " " << f.inputB << " " << (f.cutMode ? 1 : 0) << "\n";
-        out << f.sketchIndex << " " << f.count << " " << f.importIndex << "\n";
+        out << f.sketchIndex << " " << f.count << " " << f.importIndex << " " << f.pathSketchIndex << "\n";
         out << "EDGEINDICES " << f.edgeIndices.size();
         for (int edgeIndex : f.edgeIndices) out << " " << edgeIndex;
         out << "\n";
@@ -203,6 +203,10 @@ bool parseDocumentText(const std::string& text, ParsedDocument3D& parsed) {
         in >> f.inputA >> f.inputB >> cutMode;
         f.cutMode = cutMode != 0;
         in >> f.sketchIndex >> f.count >> f.importIndex;
+        // Sweep's own path-sketch reference arrived in format version 4
+        // -- an older file has no Sweep features to lose, since the type
+        // didn't exist for it to have used yet.
+        if (version >= 4) in >> f.pathSketchIndex;
         if (version >= 2) {
             if (!expectTag(in, "EDGEINDICES")) return false;
             std::size_t edgeIndexCount = 0;

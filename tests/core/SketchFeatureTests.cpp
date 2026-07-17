@@ -330,6 +330,82 @@ TEST_CASE("Document3D Loft rejects fewer than 2 profiles or a non-positive heigh
     REQUIRE_FALSE(doc.isValid(doc.addFeature(zeroHeight)));
 }
 
+TEST_CASE("Document3D Sweep of a circle along a straight path matches a cylinder's exact volume",
+         "[core3d][sweep]") {
+    Document3D doc;
+    Sketch profile;
+    profile.addCircle(profile.addPoint(Point2D(0, 0), true), 3.0);
+    const int profileIdx = doc.addSketch(profile);
+
+    Sketch path;
+    const int p0 = path.addPoint(Point2D(0, 0), true);
+    const int p1 = path.addPoint(Point2D(20, 0), true);
+    path.addLine(p0, p1);
+    const int pathIdx = doc.addSketch(path);
+
+    Feature3D sweep;
+    sweep.type = FeatureType::Sweep;
+    sweep.sketchIndex = profileIdx;
+    sweep.pathSketchIndex = pathIdx;
+    const int sweepIdx = doc.addFeature(sweep);
+
+    REQUIRE(doc.isValid(sweepIdx));
+    const double radius = 3.0, length = 20.0;
+    REQUIRE(volumeOf(doc.shapeAt(sweepIdx)) == Approx(M_PI * radius * radius * length).epsilon(1e-3));
+}
+
+TEST_CASE("Document3D Sweep rejects a multi-segment path (MakePipe needs a G1-continuous spine)",
+         "[core3d][sweep]") {
+    // A real, disclosed scope cut (see FeatureType::Sweep's own comment):
+    // BRepOffsetAPI_MakePipe requires a G1-continuous spine, which a
+    // sharp-cornered polyline path isn't -- rather than silently produce
+    // a malformed shape at the corner (a real failure mode this test
+    // caught: an early draft's 2-segment sweep came back with almost
+    // exactly the FIRST segment's own volume, meaning the second
+    // segment's contribution was silently lost), this is rejected
+    // outright as invalid.
+    Document3D doc;
+    Sketch profile;
+    profile.addCircle(profile.addPoint(Point2D(0, 0), true), 2.0);
+    const int profileIdx = doc.addSketch(profile);
+
+    Sketch path;
+    const int p0 = path.addPoint(Point2D(0, 0), true);
+    const int p1 = path.addPoint(Point2D(10, 0), true);
+    const int p2 = path.addPoint(Point2D(10, 10), true);
+    path.addLine(p0, p1);
+    path.addLine(p1, p2);
+    const int pathIdx = doc.addSketch(path);
+
+    Feature3D sweep;
+    sweep.type = FeatureType::Sweep;
+    sweep.sketchIndex = profileIdx;
+    sweep.pathSketchIndex = pathIdx;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(sweep)));
+}
+
+TEST_CASE("Document3D Sweep rejects an empty path or out-of-range sketch indices", "[core3d][sweep]") {
+    Document3D doc;
+    Sketch profile;
+    profile.addCircle(profile.addPoint(Point2D(0, 0), true), 2.0);
+    const int profileIdx = doc.addSketch(profile);
+
+    Sketch emptyPath;
+    const int emptyPathIdx = doc.addSketch(emptyPath);
+
+    Feature3D noPathLines;
+    noPathLines.type = FeatureType::Sweep;
+    noPathLines.sketchIndex = profileIdx;
+    noPathLines.pathSketchIndex = emptyPathIdx;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(noPathLines)));
+
+    Feature3D badIndex;
+    badIndex.type = FeatureType::Sweep;
+    badIndex.sketchIndex = profileIdx;
+    badIndex.pathSketchIndex = 999;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(badIndex)));
+}
+
 TEST_CASE("Document3D LinearPattern fuses count non-overlapping copies", "[core3d][pattern]") {
     Document3D doc;
     Feature3D box;

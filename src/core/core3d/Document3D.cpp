@@ -8,9 +8,13 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepTools.hxx>
+#include <gp_Dir.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -383,6 +387,70 @@ void Document3D::recomputeOne(int index) {
         loftBuilder.Build();
         ok = loftBuilder.IsDone();
         if (ok) shape = loftBuilder.Shape();
+        break;
+    }
+    case FeatureType::Sweep: {
+        if (f.sketchIndex < 0 || f.sketchIndex >= static_cast<int>(m_sketches.size()) || f.pathSketchIndex < 0 ||
+            f.pathSketchIndex >= static_cast<int>(m_sketches.size())) {
+            ok = false;
+            break;
+        }
+        const auto profileFace = sketchToFace(m_sketches[static_cast<std::size_t>(f.sketchIndex)]);
+        const Sketch& pathSketch = m_sketches[static_cast<std::size_t>(f.pathSketchIndex)];
+        // Exactly one straight line -- see FeatureType::Sweep's own
+        // comment on why a multi-segment/curved path isn't supported.
+        if (!profileFace || pathSketch.lines().size() != 1) {
+            ok = false;
+            break;
+        }
+
+        const SketchLine& firstLine = pathSketch.lines()[0];
+        const Point2D& pStart = pathSketch.points()[static_cast<std::size_t>(firstLine.p1)];
+        const Point2D& pEnd = pathSketch.points()[static_cast<std::size_t>(firstLine.p2)];
+        const Point2D dir2D = pEnd - pStart;
+        const double dirLen = dir2D.length();
+        if (dirLen < 1e-9) {
+            ok = false;
+            break;
+        }
+
+        // The profile sketch lies flat in its own local XY plane (normal
+        // +Z), same as every other sketch-consuming feature -- but a
+        // pipe sweep needs the profile perpendicular to the spine's own
+        // initial direction (its plane's normal parallel to that
+        // direction, not the +Z axis), or MakePipe just extrudes it
+        // edge-on instead of sweeping a real cross-section. Rotating the
+        // profile's own +Z axis onto the spine's start direction (a
+        // general vector-to-vector rotation: axis = their cross
+        // product, angle = the angle between them) fixes that, then
+        // translating it to the spine's own start point positions it
+        // where the sweep actually begins.
+        const gp_Dir fromDir(0.0, 0.0, 1.0);
+        const gp_Dir toDir(dir2D.x / dirLen, dir2D.y / dirLen, 0.0);
+        TopoDS_Shape profileShape = *profileFace;
+        gp_Trsf rotate;
+        if (!fromDir.IsParallel(toDir, 1e-9)) {
+            rotate.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), fromDir.Crossed(toDir)), fromDir.Angle(toDir));
+        }
+        gp_Trsf translate;
+        translate.SetTranslation(gp_Vec(pStart.x, pStart.y, 0.0));
+        profileShape = BRepBuilderAPI_Transform(profileShape, translate.Multiplied(rotate), true).Shape();
+
+        BRepBuilderAPI_MakeWire wireBuilder;
+        for (const SketchLine& line : pathSketch.lines()) {
+            const Point2D& a = pathSketch.points()[static_cast<std::size_t>(line.p1)];
+            const Point2D& b = pathSketch.points()[static_cast<std::size_t>(line.p2)];
+            wireBuilder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a.x, a.y, 0.0), gp_Pnt(b.x, b.y, 0.0)));
+        }
+        if (!wireBuilder.IsDone()) {
+            ok = false;
+            break;
+        }
+
+        BRepOffsetAPI_MakePipe pipeBuilder(wireBuilder.Wire(), profileShape);
+        pipeBuilder.Build();
+        ok = pipeBuilder.IsDone();
+        if (ok) shape = pipeBuilder.Shape();
         break;
     }
     case FeatureType::LinearPattern:

@@ -32,6 +32,7 @@ private:
     QComboBox* m_typeCombo = nullptr;
     QLabel* m_hintLabel = nullptr;
     QComboBox* m_sketchCombo = nullptr;
+    QComboBox* m_pathSketchCombo = nullptr;
     QComboBox* m_targetCombo = nullptr;
     QCheckBox* m_cutModeCheck = nullptr;
     QDoubleSpinBox* m_p1Spin = nullptr;

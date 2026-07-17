@@ -41,6 +41,7 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     m_typeCombo->addItem(QStringLiteral("Mirror"), static_cast<int>(FeatureType::Mirror));
     m_typeCombo->addItem(QStringLiteral("Shell"), static_cast<int>(FeatureType::Shell));
     m_typeCombo->addItem(QStringLiteral("Loft"), static_cast<int>(FeatureType::Loft));
+    m_typeCombo->addItem(QStringLiteral("Sweep"), static_cast<int>(FeatureType::Sweep));
     form->addRow(QStringLiteral("Type:"), m_typeCombo);
     connect(m_typeCombo, &QComboBox::currentIndexChanged, this, &SketchFeatureDialog::updateHint);
 
@@ -52,7 +53,13 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     for (std::size_t i = 0; i < document.sketches().size(); ++i) {
         m_sketchCombo->addItem(QStringLiteral("Sketch %1").arg(i), static_cast<int>(i));
     }
-    form->addRow(QStringLiteral("Sketch (Pad/Revolve):"), m_sketchCombo);
+    form->addRow(QStringLiteral("Sketch (Pad/Revolve/Sweep profile):"), m_sketchCombo);
+
+    m_pathSketchCombo = new QComboBox(this);
+    for (std::size_t i = 0; i < document.sketches().size(); ++i) {
+        m_pathSketchCombo->addItem(QStringLiteral("Sketch %1").arg(i), static_cast<int>(i));
+    }
+    form->addRow(QStringLiteral("Path Sketch (Sweep only, one straight line):"), m_pathSketchCombo);
 
     m_targetCombo = new QComboBox(this);
     m_targetCombo->addItem(QStringLiteral("(none)"), -1);
@@ -149,6 +156,10 @@ void SketchFeatureDialog::updateHint() {
         m_hintLabel->setText(QStringLiteral("Loft: builds a solid through the listed Sketch Indices (2+, in order) "
                                             "spread evenly along Height."));
         break;
+    case FeatureType::Sweep:
+        m_hintLabel->setText(QStringLiteral("Sweep: sweeps Sketch (the profile) along Path Sketch's own single "
+                                            "straight line (multi-segment/curved paths aren't supported)."));
+        break;
     default:
         break;
     }
@@ -158,6 +169,7 @@ Feature3D SketchFeatureDialog::result() const {
     Feature3D f;
     f.type = static_cast<FeatureType>(m_typeCombo->currentData().toInt());
     f.sketchIndex = m_sketchCombo->currentIndex() >= 0 ? m_sketchCombo->currentData().toInt() : -1;
+    f.pathSketchIndex = m_pathSketchCombo->currentIndex() >= 0 ? m_pathSketchCombo->currentData().toInt() : -1;
     f.inputA = m_targetCombo->currentData().toInt();
     f.cutMode = m_cutModeCheck->isChecked();
     f.p1 = m_p1Spin->value();

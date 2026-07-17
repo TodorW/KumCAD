@@ -206,3 +206,57 @@ TEST_CASE("solveSketch satisfies external circle-circle tangency", "[sketch][sol
     const double radiusB = sketch.circles()[static_cast<std::size_t>(circleB)].radius;
     REQUIRE(dist == Approx(radiusA + radiusB).margin(1e-6));
 }
+
+TEST_CASE("analyzeDof reports remaining freedom for an under-constrained sketch", "[sketch][dof]") {
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0), true); // fixed: 0 DOF
+    const int p1 = sketch.addPoint(Point2D(10, 0));       // free: 2 DOF
+    sketch.addLine(p0, p1);
+    // No constraints at all -- the free point's 2 DOF are entirely open.
+
+    const DofReport report = analyzeDof(sketch);
+    REQUIRE(report.totalDof == 2);
+    REQUIRE(report.constraintEquations == 0);
+    REQUIRE(report.remainingDof == 2);
+    REQUIRE_FALSE(report.likelyOverConstrained);
+}
+
+TEST_CASE("analyzeDof reports zero remaining freedom for the exactly-constrained rectangle", "[sketch][dof]") {
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0), true);
+    const int p1 = sketch.addPoint(Point2D(18, 2));
+    const int p2 = sketch.addPoint(Point2D(19, 9));
+    const int p3 = sketch.addPoint(Point2D(1, 11));
+    const int l0 = sketch.addLine(p0, p1);
+    const int l1 = sketch.addLine(p1, p2);
+    const int l2 = sketch.addLine(p2, p3);
+    const int l3 = sketch.addLine(p3, p0);
+    sketch.addConstraint({SketchConstraintType::Horizontal, l0});
+    sketch.addConstraint({SketchConstraintType::Horizontal, l2});
+    sketch.addConstraint({SketchConstraintType::Vertical, l1});
+    sketch.addConstraint({SketchConstraintType::Vertical, l3});
+    sketch.addConstraint({SketchConstraintType::Distance, -1, -1, p0, p1, 20.0});
+    sketch.addConstraint({SketchConstraintType::Distance, -1, -1, p1, p2, 10.0});
+
+    // 6 free points' worth of DOF (3 free points x 2) == 6 constraint equations.
+    const DofReport report = analyzeDof(sketch);
+    REQUIRE(report.totalDof == 6);
+    REQUIRE(report.constraintEquations == 6);
+    REQUIRE(report.remainingDof == 0);
+    REQUIRE_FALSE(report.likelyOverConstrained);
+}
+
+TEST_CASE("analyzeDof flags likelyOverConstrained when equations outnumber free variables", "[sketch][dof]") {
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0), true);
+    const int p1 = sketch.addPoint(Point2D(10, 0), true); // both fixed: 0 total DOF
+    const int line = sketch.addLine(p0, p1);
+    sketch.addConstraint({SketchConstraintType::Horizontal, line});
+    sketch.addConstraint({SketchConstraintType::Distance, -1, -1, p0, p1, 10.0});
+
+    const DofReport report = analyzeDof(sketch);
+    REQUIRE(report.totalDof == 0);
+    REQUIRE(report.constraintEquations == 2);
+    REQUIRE(report.remainingDof == 0);
+    REQUIRE(report.likelyOverConstrained);
+}

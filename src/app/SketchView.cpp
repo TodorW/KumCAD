@@ -53,10 +53,15 @@ void SketchView::clearSelection() {
 
 void SketchView::resolve() {
     const lcad::SolveResult result = solveSketch(m_sketch);
-    emit statusMessage(result.converged ? QStringLiteral("Solved (residual %1)").arg(result.finalResidualNorm, 0, 'e', 2)
-                                        : QStringLiteral("Did not converge (residual %1) — check for conflicting "
-                                                         "or redundant constraints")
-                                              .arg(result.finalResidualNorm, 0, 'e', 2));
+    const lcad::DofReport dof = lcad::analyzeDof(m_sketch);
+    QString dofText = dof.likelyOverConstrained
+                         ? QStringLiteral(" — likely over-constrained (%1 equation(s) for %2 DOF)").arg(dof.constraintEquations).arg(dof.totalDof)
+                         : QStringLiteral(" — %1 DOF remaining").arg(dof.remainingDof);
+    emit statusMessage((result.converged ? QStringLiteral("Solved (residual %1)").arg(result.finalResidualNorm, 0, 'e', 2)
+                                         : QStringLiteral("Did not converge (residual %1) — check for conflicting "
+                                                          "or redundant constraints")
+                                               .arg(result.finalResidualNorm, 0, 'e', 2)) +
+                       dofText);
     update();
 }
 

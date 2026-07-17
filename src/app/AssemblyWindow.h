@@ -23,6 +23,7 @@ private:
     void addComponentFromStep();
     void addMate();
     void solve();
+    void checkDof();
     void refreshComponentList();
     void refreshMateList();
     void refreshViewport();

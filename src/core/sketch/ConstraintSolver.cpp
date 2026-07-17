@@ -2,6 +2,7 @@
 
 #include "core/sketch/LinearSolve.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace lcad {
@@ -310,6 +311,16 @@ SolveResult solveSketch(Sketch& sketch, int maxIterations, double tolerance) {
     result.iterations = iter;
     if (result.finalResidualNorm < tolerance) result.converged = true;
     return result;
+}
+
+DofReport analyzeDof(const Sketch& sketch) {
+    DofReport report;
+    const VariableMap vars(sketch);
+    report.totalDof = vars.size();
+    report.constraintEquations = static_cast<int>(sketch.constraints().size()) + 2 * static_cast<int>(sketch.arcs().size());
+    report.remainingDof = std::max(0, report.totalDof - report.constraintEquations);
+    report.likelyOverConstrained = report.constraintEquations > report.totalDof;
+    return report;
 }
 
 } // namespace lcad

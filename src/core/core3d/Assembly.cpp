@@ -69,4 +69,22 @@ void Assembly::solve() {
     }
 }
 
+AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly) {
+    AssemblyDofReport report;
+    const auto& components = assembly.components();
+
+    std::vector<int> matedCount(components.size(), 0);
+    for (const Mate& mate : assembly.mates()) {
+        if (mate.componentB >= 0 && mate.componentB < static_cast<int>(components.size())) {
+            ++matedCount[static_cast<std::size_t>(mate.componentB)];
+        }
+    }
+
+    for (std::size_t i = 0; i < components.size(); ++i) {
+        if (!components[i].fixed && matedCount[i] == 0) report.unplacedComponentIndices.push_back(static_cast<int>(i));
+        if (matedCount[i] > 1) report.multiplyMatedComponentIndices.push_back(static_cast<int>(i));
+    }
+    return report;
+}
+
 } // namespace lcad

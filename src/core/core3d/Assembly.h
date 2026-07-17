@@ -81,4 +81,22 @@ private:
     std::vector<Mate> m_mates;
 };
 
+// A bounded diagnostic matching the closed-form solving model above (not
+// a general DOF/redundancy analysis over a constraint graph, which this
+// solver was deliberately never built as -- see MateType's own comment).
+struct AssemblyDofReport {
+    // Neither fixed nor ever the componentB of a mate -- stays at its
+    // default identity placement, effectively floating/unplaced.
+    std::vector<int> unplacedComponentIndices;
+    // The componentB of more than one mate: in this solver's forward-pass
+    // model, a later mate targeting the same componentB silently
+    // overwrites the placement an earlier mate gave it (see Assembly::
+    // solve()'s own "one forward pass" model) rather than being detected
+    // as a conflict -- this surfaces that real footgun instead of letting
+    // it pass silently.
+    std::vector<int> multiplyMatedComponentIndices;
+};
+
+AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly);
+
 } // namespace lcad

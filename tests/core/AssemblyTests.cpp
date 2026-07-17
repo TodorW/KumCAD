@@ -201,3 +201,57 @@ TEST_CASE("Assembly solves a mate chain in list order, matching Document3D's own
     const gp_Pnt topOrigin = gp_Pnt(0, 0, 0).Transformed(asm_.components()[static_cast<std::size_t>(idxTop)].placement);
     REQUIRE(topOrigin.Z() == Approx(20.0).margin(1e-6)); // stacked base(0-10) + middle(10-20) + top starts at 20
 }
+
+TEST_CASE("analyzeAssemblyDof flags a component that's neither fixed nor mated as unplaced", "[core3d][assembly][dof]") {
+    Assembly asm_;
+    AssemblyComponent base;
+    base.shape = makeBox(10.0);
+    base.fixed = true;
+    const int idxBase = asm_.addComponent(base);
+
+    AssemblyComponent mated;
+    mated.shape = makeBox(10.0);
+    const int idxMated = asm_.addComponent(mated);
+
+    AssemblyComponent floating;
+    floating.shape = makeBox(5.0);
+    const int idxFloating = asm_.addComponent(floating);
+
+    Mate mate;
+    mate.type = MateType::Coincident;
+    mate.componentA = idxBase;
+    mate.componentB = idxMated;
+    asm_.addMate(mate);
+
+    const AssemblyDofReport report = analyzeAssemblyDof(asm_);
+    REQUIRE(report.unplacedComponentIndices.size() == 1);
+    REQUIRE(report.unplacedComponentIndices[0] == idxFloating);
+    REQUIRE(report.multiplyMatedComponentIndices.empty());
+}
+
+TEST_CASE("analyzeAssemblyDof flags a component mated more than once (later mate silently wins)",
+          "[core3d][assembly][dof]") {
+    Assembly asm_;
+    AssemblyComponent base;
+    base.shape = makeBox(10.0);
+    base.fixed = true;
+    const int idxBase = asm_.addComponent(base);
+    AssemblyComponent target;
+    target.shape = makeBox(5.0);
+    const int idxTarget = asm_.addComponent(target);
+
+    Mate first;
+    first.componentA = idxBase;
+    first.componentB = idxTarget;
+    asm_.addMate(first);
+    Mate second;
+    second.componentA = idxBase;
+    second.componentB = idxTarget; // same target again -- overwrites the first mate's placement
+    second.value = 5.0;
+    asm_.addMate(second);
+
+    const AssemblyDofReport report = analyzeAssemblyDof(asm_);
+    REQUIRE(report.multiplyMatedComponentIndices.size() == 1);
+    REQUIRE(report.multiplyMatedComponentIndices[0] == idxTarget);
+    REQUIRE(report.unplacedComponentIndices.empty());
+}

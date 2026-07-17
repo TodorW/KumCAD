@@ -17,6 +17,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QStatusBar>
+#include <QStringList>
 #include <QToolBar>
 
 using lcad::AssemblyComponent;
@@ -140,6 +141,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("Add Component from STEP..."), this, &AssemblyWindow::addComponentFromStep);
     toolbar->addAction(QStringLiteral("Add Mate..."), this, &AssemblyWindow::addMate);
     toolbar->addAction(QStringLiteral("Solve"), this, &AssemblyWindow::solve);
+    toolbar->addAction(QStringLiteral("Check DOF..."), this, &AssemblyWindow::checkDof);
 
     if (m_viewport->isAvailable()) {
         statusBar()->showMessage(QStringLiteral("Add components from STEP files, define mates between them, then "
@@ -187,6 +189,32 @@ void AssemblyWindow::solve() {
     m_assembly.solve();
     refreshViewport();
     statusBar()->showMessage(QStringLiteral("Solved"), 2000);
+}
+
+void AssemblyWindow::checkDof() {
+    const lcad::AssemblyDofReport report = lcad::analyzeAssemblyDof(m_assembly);
+    QString message;
+    if (report.unplacedComponentIndices.empty() && report.multiplyMatedComponentIndices.empty()) {
+        message = QStringLiteral("Every component is either fixed or placed by exactly one mate.");
+    } else {
+        if (!report.unplacedComponentIndices.empty()) {
+            QStringList names;
+            for (int idx : report.unplacedComponentIndices) {
+                names << QStringLiteral("[%1] %2").arg(idx).arg(
+                    QString::fromStdString(m_assembly.components()[static_cast<std::size_t>(idx)].name));
+            }
+            message += QStringLiteral("Unplaced (neither fixed nor mated): %1\n").arg(names.join(QStringLiteral(", ")));
+        }
+        if (!report.multiplyMatedComponentIndices.empty()) {
+            QStringList names;
+            for (int idx : report.multiplyMatedComponentIndices) {
+                names << QStringLiteral("[%1] %2").arg(idx).arg(
+                    QString::fromStdString(m_assembly.components()[static_cast<std::size_t>(idx)].name));
+            }
+            message += QStringLiteral("Mated more than once (later mate silently wins): %1").arg(names.join(QStringLiteral(", ")));
+        }
+    }
+    QMessageBox::information(this, QStringLiteral("Assembly DOF Check"), message);
 }
 
 void AssemblyWindow::refreshComponentList() {

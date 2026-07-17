@@ -3,7 +3,10 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <Geom_Circle.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
@@ -11,6 +14,7 @@
 #include <gp_Pnt.hxx>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace lcad {
@@ -19,7 +23,7 @@ namespace {
 
 struct Loop {
     TopoDS_Wire wire;
-    double signedArea = 0.0; // shoelace sign for line loops; a fixed +1-scaled magnitude for circle loops
+    double signedArea = 0.0; // shoelace sign for line/arc loops; a fixed +1-scaled magnitude for circle loops
 };
 
 double shoelaceSignedArea(const std::vector<Point2D>& pts) {
@@ -32,49 +36,96 @@ double shoelaceSignedArea(const std::vector<Point2D>& pts) {
     return 0.5 * sum;
 }
 
-// Greedily chains non-construction lines into closed point-index loops.
-// Assumes each point has degree <= 2 in the profile (a simple polygon) --
-// disclosed in the header.
-std::vector<std::vector<int>> findClosedLineLoops(const Sketch& sketch) {
-    std::vector<int> lineIndices;
-    for (std::size_t i = 0; i < sketch.lines().size(); ++i) {
-        if (!sketch.lines()[i].construction) lineIndices.push_back(static_cast<int>(i));
-    }
-    std::vector<bool> used(lineIndices.size(), false);
-    std::vector<std::vector<int>> loops;
+// One traversal step in a chained loop: a straight edge (arcIndex < 0) or
+// an arc (arcIndex into sketch.arcs()) from p1 to p2 -- p1/p2 may be
+// swapped relative to how the underlying SketchLine/SketchArc stores its
+// own endpoints, tracked via `reversed` so arc sweep direction comes out
+// right when the wire is actually built.
+struct ChainEdge {
+    int p1 = -1;
+    int p2 = -1;
+    int arcIndex = -1;
+    bool reversed = false;
+};
 
-    for (std::size_t startIdx = 0; startIdx < lineIndices.size(); ++startIdx) {
+// Greedily chains non-construction lines AND arcs into closed point-index
+// loops (mixed line/arc profiles, e.g. a rounded rectangle, chain exactly
+// like an all-line profile since both are just "edges with two point
+// endpoints" to this algorithm). Assumes each point has degree <= 2 in the
+// profile (a simple polygon) -- disclosed in the header.
+std::vector<std::vector<ChainEdge>> findClosedLoops(const Sketch& sketch) {
+    std::vector<ChainEdge> edges;
+    for (std::size_t i = 0; i < sketch.lines().size(); ++i) {
+        if (sketch.lines()[i].construction) continue;
+        edges.push_back({sketch.lines()[i].p1, sketch.lines()[i].p2, -1, false});
+    }
+    for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
+        if (sketch.arcs()[i].construction) continue;
+        edges.push_back({sketch.arcs()[i].start, sketch.arcs()[i].end, static_cast<int>(i), false});
+    }
+
+    std::vector<bool> used(edges.size(), false);
+    std::vector<std::vector<ChainEdge>> loops;
+
+    for (std::size_t startIdx = 0; startIdx < edges.size(); ++startIdx) {
         if (used[startIdx]) continue;
         used[startIdx] = true;
-        const SketchLine& startLine = sketch.lines()[static_cast<std::size_t>(lineIndices[startIdx])];
-        std::vector<int> loopPoints = {startLine.p1, startLine.p2};
+        std::vector<ChainEdge> chain = {edges[startIdx]};
+        const int head = edges[startIdx].p1;
+        int tail = edges[startIdx].p2;
 
         bool extended = true;
         while (extended) {
             extended = false;
-            for (std::size_t i = 0; i < lineIndices.size(); ++i) {
+            for (std::size_t i = 0; i < edges.size(); ++i) {
                 if (used[i]) continue;
-                const SketchLine& line = sketch.lines()[static_cast<std::size_t>(lineIndices[i])];
-                if (line.p1 == loopPoints.back() && line.p2 != loopPoints.back()) {
-                    loopPoints.push_back(line.p2);
+                ChainEdge e = edges[i];
+                if (e.p1 == tail && e.p2 != tail) {
+                    chain.push_back(e);
+                    tail = e.p2;
                     used[i] = true;
                     extended = true;
-                } else if (line.p2 == loopPoints.back() && line.p1 != loopPoints.back()) {
-                    loopPoints.push_back(line.p1);
+                } else if (e.p2 == tail && e.p1 != tail) {
+                    std::swap(e.p1, e.p2);
+                    e.reversed = true;
+                    chain.push_back(e);
+                    tail = e.p2;
                     used[i] = true;
                     extended = true;
                 }
             }
         }
 
-        if (loopPoints.size() >= 3 && loopPoints.back() == loopPoints.front()) {
-            loopPoints.pop_back(); // last point duplicates the first once closed
-            loops.push_back(std::move(loopPoints));
-        }
+        if (chain.size() >= 2 && tail == head) loops.push_back(std::move(chain));
         // An unclosed chain (open profile) is silently dropped -- it can't
         // bound a face, and there's no separate "open sketch" use case yet.
     }
     return loops;
+}
+
+TopoDS_Edge makeArcEdge(const Sketch& sketch, const SketchArc& arc, const ChainEdge& edge) {
+    const Point2D& center = sketch.points()[static_cast<std::size_t>(arc.center)];
+    const Point2D& p1 = sketch.points()[static_cast<std::size_t>(edge.p1)];
+    const Point2D& p2 = sketch.points()[static_cast<std::size_t>(edge.p2)];
+
+    const bool effectiveCcw = edge.reversed ? !arc.ccw : arc.ccw;
+    double startAngle = std::atan2(p1.y - center.y, p1.x - center.x);
+    double endAngle = std::atan2(p2.y - center.y, p2.x - center.x);
+    if (effectiveCcw) {
+        while (endAngle < startAngle) endAngle += 2.0 * M_PI;
+    } else {
+        while (endAngle > startAngle) endAngle -= 2.0 * M_PI;
+    }
+    const double u1 = std::min(startAngle, endAngle);
+    const double u2 = std::max(startAngle, endAngle);
+
+    // XDirection pinned to world +X so the circle's own parameter is a
+    // plain polar angle, matching startAngle/endAngle computed via
+    // atan2 -- the same fix SheetMetal.cpp's arc edges needed.
+    const gp_Ax2 axis(gp_Pnt(center.x, center.y, 0.0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0));
+    Handle(Geom_Circle) circle = new Geom_Circle(axis, arc.radius);
+    Handle(Geom_TrimmedCurve) trimmed = new Geom_TrimmedCurve(circle, u1, u2);
+    return BRepBuilderAPI_MakeEdge(trimmed).Edge();
 }
 
 } // namespace
@@ -82,18 +133,26 @@ std::vector<std::vector<int>> findClosedLineLoops(const Sketch& sketch) {
 std::optional<TopoDS_Face> sketchToFace(const Sketch& sketch) {
     std::vector<Loop> loops;
 
-    for (const auto& loopPointIndices : findClosedLineLoops(sketch)) {
+    for (const auto& chain : findClosedLoops(sketch)) {
         std::vector<Point2D> pts;
-        pts.reserve(loopPointIndices.size());
-        for (int idx : loopPointIndices) pts.push_back(sketch.points()[static_cast<std::size_t>(idx)]);
+        pts.reserve(chain.size());
+        for (const ChainEdge& edge : chain) pts.push_back(sketch.points()[static_cast<std::size_t>(edge.p1)]);
 
         BRepBuilderAPI_MakeWire wireBuilder;
-        for (std::size_t i = 0; i < pts.size(); ++i) {
-            const Point2D& a = pts[i];
-            const Point2D& b = pts[(i + 1) % pts.size()];
-            wireBuilder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a.x, a.y, 0.0), gp_Pnt(b.x, b.y, 0.0)).Edge());
+        for (const ChainEdge& edge : chain) {
+            if (edge.arcIndex < 0) {
+                const Point2D& a = sketch.points()[static_cast<std::size_t>(edge.p1)];
+                const Point2D& b = sketch.points()[static_cast<std::size_t>(edge.p2)];
+                wireBuilder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a.x, a.y, 0.0), gp_Pnt(b.x, b.y, 0.0)).Edge());
+            } else {
+                wireBuilder.Add(makeArcEdge(sketch, sketch.arcs()[static_cast<std::size_t>(edge.arcIndex)], edge));
+            }
         }
         if (!wireBuilder.IsDone()) continue;
+        // Chord-polygon area (arcs approximated by their chords here) --
+        // fine for the "which loop is the outer boundary" comparison
+        // below; the wire actually added to the face above uses the real
+        // arc geometry, not this approximation.
         loops.push_back({wireBuilder.Wire(), shoelaceSignedArea(pts)});
     }
 

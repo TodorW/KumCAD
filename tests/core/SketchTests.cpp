@@ -161,3 +161,48 @@ TEST_CASE("solveSketch dimensions a circle's radius directly", "[sketch][solver]
     REQUIRE(solveSketch(sketch).converged);
     REQUIRE(sketch.circles()[static_cast<std::size_t>(circle)].radius == Approx(7.5).margin(1e-6));
 }
+
+TEST_CASE("solveSketch enforces an arc's implicit radius consistency even with no explicit constraints",
+         "[sketch][solver][arc]") {
+    Sketch sketch;
+    const int center = sketch.addPoint(Point2D(0, 0), true);
+    const int start = sketch.addPoint(Point2D(6, 0)); // should settle at distance == radius (5) from center
+    const int end = sketch.addPoint(Point2D(0, 4));   // should settle at distance == radius (5) from center
+    sketch.addArc(center, start, end, 5.0);
+
+    REQUIRE(solveSketch(sketch).converged);
+    const Point2D c = sketch.points()[static_cast<std::size_t>(center)];
+    REQUIRE(sketch.points()[static_cast<std::size_t>(start)].distanceTo(c) == Approx(5.0).margin(1e-6));
+    REQUIRE(sketch.points()[static_cast<std::size_t>(end)].distanceTo(c) == Approx(5.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch dimensions an arc's radius, moving its free start/end to match", "[sketch][solver][arc]") {
+    Sketch sketch;
+    const int center = sketch.addPoint(Point2D(0, 0), true);
+    const int start = sketch.addPoint(Point2D(5, 0)); // radius 5 initially
+    const int end = sketch.addPoint(Point2D(0, 5));
+    const int arc = sketch.addArc(center, start, end, 5.0);
+    sketch.addConstraint({SketchConstraintType::ArcRadius, arc, -1, -1, -1, 8.0});
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.arcs()[static_cast<std::size_t>(arc)].radius == Approx(8.0).margin(1e-6));
+    const Point2D c = sketch.points()[static_cast<std::size_t>(center)];
+    REQUIRE(sketch.points()[static_cast<std::size_t>(start)].distanceTo(c) == Approx(8.0).margin(1e-6));
+    REQUIRE(sketch.points()[static_cast<std::size_t>(end)].distanceTo(c) == Approx(8.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch satisfies external circle-circle tangency", "[sketch][solver]") {
+    Sketch sketch;
+    const int centerA = sketch.addPoint(Point2D(0, 0), true);
+    const int centerB = sketch.addPoint(Point2D(10, 3)); // not yet tangent
+    const int circleA = sketch.addCircle(centerA, 4.0);
+    const int circleB = sketch.addCircle(centerB, 3.0);
+    sketch.addConstraint({SketchConstraintType::TangentCircleCircle, circleA, circleB});
+
+    REQUIRE(solveSketch(sketch).converged);
+    const double dist =
+        sketch.points()[static_cast<std::size_t>(centerA)].distanceTo(sketch.points()[static_cast<std::size_t>(centerB)]);
+    const double radiusA = sketch.circles()[static_cast<std::size_t>(circleA)].radius;
+    const double radiusB = sketch.circles()[static_cast<std::size_t>(circleB)].radius;
+    REQUIRE(dist == Approx(radiusA + radiusB).margin(1e-6));
+}

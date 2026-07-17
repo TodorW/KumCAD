@@ -24,6 +24,7 @@ SketchEditorDialog::SketchEditorDialog(QWidget* parent) : QDialog(parent) {
     toolbar->addAction(QStringLiteral("Select"), this, [this] { m_view->setTool(SketchView::Tool::Select); });
     toolbar->addAction(QStringLiteral("Line"), this, [this] { m_view->setTool(SketchView::Tool::Line); });
     toolbar->addAction(QStringLiteral("Circle"), this, [this] { m_view->setTool(SketchView::Tool::Circle); });
+    toolbar->addAction(QStringLiteral("Arc"), this, [this] { m_view->setTool(SketchView::Tool::Arc); });
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Horizontal"), this, &SketchEditorDialog::applyHorizontal);
     toolbar->addAction(QStringLiteral("Vertical"), this, &SketchEditorDialog::applyVertical);
@@ -31,8 +32,10 @@ SketchEditorDialog::SketchEditorDialog(QWidget* parent) : QDialog(parent) {
     toolbar->addAction(QStringLiteral("Perpendicular"), this, &SketchEditorDialog::applyPerpendicular);
     toolbar->addAction(QStringLiteral("Equal"), this, &SketchEditorDialog::applyEqual);
     toolbar->addAction(QStringLiteral("Tangent"), this, &SketchEditorDialog::applyTangent);
+    toolbar->addAction(QStringLiteral("Circle-Circle Tangent"), this, &SketchEditorDialog::applyCircleCircleTangent);
     toolbar->addAction(QStringLiteral("Distance..."), this, &SketchEditorDialog::applyDistance);
     toolbar->addAction(QStringLiteral("Radius..."), this, &SketchEditorDialog::applyRadius);
+    toolbar->addAction(QStringLiteral("Arc Radius..."), this, &SketchEditorDialog::applyArcRadius);
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Toggle Construction"), this, &SketchEditorDialog::toggleConstruction);
     layout->addWidget(toolbar);
@@ -97,6 +100,22 @@ std::optional<std::pair<int, int>> SketchEditorDialog::lineAndCircle() {
     return std::nullopt;
 }
 
+std::optional<int> SketchEditorDialog::oneSelectedArc() {
+    const auto& sel = m_view->selection();
+    if (sel.size() == 1 && sel[0].kind == Kind::Arc) return sel[0].index;
+    m_statusLabel->setText(QStringLiteral("Select exactly one arc first"));
+    return std::nullopt;
+}
+
+std::optional<std::pair<int, int>> SketchEditorDialog::twoSelectedCircles() {
+    const auto& sel = m_view->selection();
+    if (sel.size() == 2 && sel[0].kind == Kind::Circle && sel[1].kind == Kind::Circle) {
+        return std::make_pair(sel[0].index, sel[1].index);
+    }
+    m_statusLabel->setText(QStringLiteral("Select exactly two circles first"));
+    return std::nullopt;
+}
+
 void SketchEditorDialog::applyHorizontal() {
     const auto line = oneSelectedLine();
     if (!line) return;
@@ -139,6 +158,13 @@ void SketchEditorDialog::applyTangent() {
     m_view->resolve();
 }
 
+void SketchEditorDialog::applyCircleCircleTangent() {
+    const auto pair = twoSelectedCircles();
+    if (!pair) return;
+    m_view->sketch().addConstraint({SketchConstraintType::TangentCircleCircle, pair->first, pair->second});
+    m_view->resolve();
+}
+
 void SketchEditorDialog::applyDistance() {
     const auto points = twoPointsForDistance();
     if (!points) return;
@@ -171,6 +197,9 @@ void SketchEditorDialog::toggleConstruction() {
         } else if (s.kind == Kind::Circle) {
             auto& circle = m_view->sketch().circles()[static_cast<std::size_t>(s.index)];
             circle.construction = !circle.construction;
+        } else if (s.kind == Kind::Arc) {
+            auto& arc = m_view->sketch().arcs()[static_cast<std::size_t>(s.index)];
+            arc.construction = !arc.construction;
         }
     }
     m_view->update();
@@ -186,6 +215,21 @@ void SketchEditorDialog::applyRadius() {
     SketchConstraint c;
     c.type = SketchConstraintType::Radius;
     c.geomA = *circle;
+    c.value = value;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyArcRadius() {
+    const auto arc = oneSelectedArc();
+    if (!arc) return;
+    bool ok = false;
+    const double value = QInputDialog::getDouble(this, QStringLiteral("Arc Radius"), QStringLiteral("Value:"), 10.0,
+                                                  0.0, 1e6, 3, &ok);
+    if (!ok) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::ArcRadius;
+    c.geomA = *arc;
     c.value = value;
     m_view->sketch().addConstraint(c);
     m_view->resolve();

@@ -14,6 +14,22 @@ using lcad::Point2D;
 
 namespace {
 constexpr double kPickPixels = 10.0;
+
+// Sweep from start to end around center going ccw (or cw), wrapped into a
+// single increasing angle range -- same wraparound math as
+// SketchToFace.cpp's makeArcEdge, kept in sync deliberately rather than
+// shared, since this one only ever needs the arc's own stored (start,end)
+// order (no traversal-direction reversal to account for).
+std::pair<double, double> arcAngleRange(const Point2D& center, const Point2D& start, const Point2D& end, bool ccw) {
+    double startAngle = std::atan2(start.y - center.y, start.x - center.x);
+    double endAngle = std::atan2(end.y - center.y, end.x - center.x);
+    if (ccw) {
+        while (endAngle < startAngle) endAngle += 2.0 * M_PI;
+    } else {
+        while (endAngle > startAngle) endAngle -= 2.0 * M_PI;
+    }
+    return {std::min(startAngle, endAngle), std::max(startAngle, endAngle)};
+}
 }
 
 SketchView::SketchView(QWidget* parent) : QWidget(parent) {
@@ -25,6 +41,8 @@ SketchView::SketchView(QWidget* parent) : QWidget(parent) {
 void SketchView::setTool(Tool tool) {
     m_tool = tool;
     m_pendingLineStart.reset();
+    m_pendingArcCenter.reset();
+    m_pendingArcStart.reset();
 }
 
 void SketchView::clearSelection() {
@@ -88,6 +106,17 @@ std::optional<SketchView::Selection> SketchView::pickEntity(const Point2D& sketc
             return Selection{Selection::Kind::Circle, static_cast<int>(i)};
         }
     }
+    for (std::size_t i = 0; i < m_sketch.arcs().size(); ++i) {
+        const auto& arc = m_sketch.arcs()[i];
+        const Point2D& center = m_sketch.points()[static_cast<std::size_t>(arc.center)];
+        if (std::abs(sketchPos.distanceTo(center) - arc.radius) > tolSketch) continue;
+        const Point2D& start = m_sketch.points()[static_cast<std::size_t>(arc.start)];
+        const Point2D& end = m_sketch.points()[static_cast<std::size_t>(arc.end)];
+        const auto [lo, hi] = arcAngleRange(center, start, end, arc.ccw);
+        double angle = std::atan2(sketchPos.y - center.y, sketchPos.x - center.x);
+        while (angle < lo) angle += 2.0 * M_PI;
+        if (angle <= hi) return Selection{Selection::Kind::Arc, static_cast<int>(i)};
+    }
     return std::nullopt;
 }
 
@@ -118,6 +147,30 @@ void SketchView::paintEvent(QPaintEvent*) {
         painter.setPen(pen);
         painter.drawLine(toScreen(m_sketch.points()[static_cast<std::size_t>(line.p1)]),
                          toScreen(m_sketch.points()[static_cast<std::size_t>(line.p2)]));
+    }
+
+    for (std::size_t i = 0; i < m_sketch.arcs().size(); ++i) {
+        const auto& arc = m_sketch.arcs()[i];
+        QPen pen(isSelected(Selection::Kind::Arc, static_cast<int>(i)) ? QColor(255, 200, 0) : QColor(120, 255, 180));
+        if (arc.construction) pen.setStyle(Qt::DashLine);
+        painter.setPen(pen);
+        const Point2D& center = m_sketch.points()[static_cast<std::size_t>(arc.center)];
+        const Point2D& start = m_sketch.points()[static_cast<std::size_t>(arc.start)];
+        const Point2D& end = m_sketch.points()[static_cast<std::size_t>(arc.end)];
+        const auto [lo, hi] = arcAngleRange(center, start, end, arc.ccw);
+        // Tessellated into a polyline rather than QPainter::drawArc -- this
+        // sidesteps Qt's own arc-angle sign convention entirely (toScreen
+        // already flips Y for sketch-space-vs-screen-space), matching
+        // SketchToFace.cpp's angle math exactly instead of a second,
+        // easy-to-get-backwards convention.
+        constexpr int kSegments = 24;
+        QPointF previous = toScreen(Point2D(center.x + arc.radius * std::cos(lo), center.y + arc.radius * std::sin(lo)));
+        for (int s = 1; s <= kSegments; ++s) {
+            const double t = lo + (hi - lo) * (static_cast<double>(s) / kSegments);
+            const QPointF next = toScreen(Point2D(center.x + arc.radius * std::cos(t), center.y + arc.radius * std::sin(t)));
+            painter.drawLine(previous, next);
+            previous = next;
+        }
     }
 
     for (std::size_t i = 0; i < m_sketch.points().size(); ++i) {
@@ -157,6 +210,25 @@ void SketchView::mousePressEvent(QMouseEvent* event) {
             }
             m_pendingLineStart.reset();
         }
+    } else if (m_tool == Tool::Arc) {
+        if (!m_pendingArcCenter) {
+            m_pendingArcCenter = findOrCreatePoint(sketchPos);
+            emit statusMessage(QStringLiteral("Specify arc start point"));
+        } else if (!m_pendingArcStart) {
+            m_pendingArcStart = findOrCreatePoint(sketchPos);
+            emit statusMessage(QStringLiteral("Specify arc end point"));
+        } else {
+            const int endIdx = findOrCreatePoint(sketchPos);
+            const Point2D& center = m_sketch.points()[static_cast<std::size_t>(*m_pendingArcCenter)];
+            const Point2D& start = m_sketch.points()[static_cast<std::size_t>(*m_pendingArcStart)];
+            const double radius = center.distanceTo(start);
+            if (radius > 1e-6 && endIdx != *m_pendingArcStart) {
+                m_sketch.addArc(*m_pendingArcCenter, *m_pendingArcStart, endIdx, radius, true);
+                resolve();
+            }
+            m_pendingArcCenter.reset();
+            m_pendingArcStart.reset();
+        }
     } else {
         const auto picked = pickEntity(sketchPos);
         if (event->modifiers() & Qt::ShiftModifier) {
@@ -177,8 +249,10 @@ void SketchView::wheelEvent(QWheelEvent* event) {
 }
 
 void SketchView::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Escape && m_pendingLineStart) {
+    if (event->key() == Qt::Key_Escape && (m_pendingLineStart || m_pendingArcCenter || m_pendingArcStart)) {
         m_pendingLineStart.reset();
+        m_pendingArcCenter.reset();
+        m_pendingArcStart.reset();
         emit statusMessage(QStringLiteral("Ready"));
     } else {
         QWidget::keyPressEvent(event);

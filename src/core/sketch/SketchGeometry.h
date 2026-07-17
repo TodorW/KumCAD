@@ -29,6 +29,26 @@ struct SketchCircle {
     bool construction = false;
 };
 
+// An arc's start/end are real point indices (like SketchLine's p1/p2), so
+// a line can structurally share an endpoint with an arc the same way it
+// shares one with another line -- the whole point of this codebase's
+// "coincidence is structural" design. radius is its own solver DOF (like
+// SketchCircle's), and the solver keeps start/end pinned to that radius
+// around center via an always-on internal consistency residual (see
+// ConstraintSolver.cpp) rather than a constraint the user can remove --
+// an arc that isn't actually circular isn't an arc. ccw says which of the
+// two possible sweeps (short way vs. long way, in the counter-clockwise
+// sense) between start and end is the intended one; there's no
+// automatic "shortest arc" inference.
+struct SketchArc {
+    int center = -1;
+    int start = -1;
+    int end = -1;
+    double radius = 10.0;
+    bool ccw = true;
+    bool construction = false;
+};
+
 enum class SketchConstraintType {
     Horizontal,   // geomA (line) is horizontal
     Vertical,     // geomA (line) is vertical
@@ -36,8 +56,11 @@ enum class SketchConstraintType {
     Parallel,     // geomA, geomB (lines) have parallel directions
     Perpendicular, // geomA, geomB (lines) have perpendicular directions
     Equal,        // geomA, geomB (lines) have equal length
-    Tangent,      // geomA (line) is tangent to geomB (circle) -- line-circle only, not circle-circle, in this pass
+    Tangent,      // geomA (line) is tangent to geomB (circle)
     Radius,       // geomA (circle) has radius == value -- how a circle gets dimensioned
+    ArcRadius,    // geomA (arc) has radius == value -- how an arc gets dimensioned
+    TangentCircleCircle, // geomA, geomB (circles) are externally tangent (distance(centers) == rA + rB) --
+                         // internal tangency (one circle inside the other) isn't covered, a disclosed gap
 };
 
 struct SketchConstraint {
@@ -54,6 +77,7 @@ public:
     int addPoint(Point2D p, bool fixed = false);
     int addLine(int p1, int p2, bool construction = false);
     int addCircle(int center, double radius, bool construction = false);
+    int addArc(int center, int start, int end, double radius, bool ccw = true, bool construction = false);
     void addConstraint(SketchConstraint constraint);
 
     const std::vector<Point2D>& points() const { return m_points; }
@@ -63,6 +87,8 @@ public:
     std::vector<SketchLine>& lines() { return m_lines; }
     const std::vector<SketchCircle>& circles() const { return m_circles; }
     std::vector<SketchCircle>& circles() { return m_circles; }
+    const std::vector<SketchArc>& arcs() const { return m_arcs; }
+    std::vector<SketchArc>& arcs() { return m_arcs; }
     const std::vector<SketchConstraint>& constraints() const { return m_constraints; }
     std::vector<SketchConstraint>& constraints() { return m_constraints; }
 
@@ -71,6 +97,7 @@ private:
     std::vector<bool> m_fixed;
     std::vector<SketchLine> m_lines;
     std::vector<SketchCircle> m_circles;
+    std::vector<SketchArc> m_arcs;
     std::vector<SketchConstraint> m_constraints;
 };
 

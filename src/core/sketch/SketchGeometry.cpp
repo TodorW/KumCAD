@@ -18,6 +18,11 @@ int Sketch::addCircle(int center, double radius, bool construction) {
     return static_cast<int>(m_circles.size()) - 1;
 }
 
+int Sketch::addArc(int center, int start, int end, double radius, bool ccw, bool construction) {
+    m_arcs.push_back({center, start, end, radius, ccw, construction});
+    return static_cast<int>(m_arcs.size()) - 1;
+}
+
 void Sketch::addConstraint(SketchConstraint constraint) {
     m_constraints.push_back(constraint);
 }

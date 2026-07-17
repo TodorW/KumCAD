@@ -13,7 +13,9 @@ namespace {
 // no slot at all and always read from the sketch's stored value.
 class VariableMap {
 public:
-    explicit VariableMap(const Sketch& sketch) : m_pointVar(sketch.points().size(), -1), m_circleVar(sketch.circles().size(), -1) {
+    explicit VariableMap(const Sketch& sketch)
+        : m_pointVar(sketch.points().size(), -1), m_circleVar(sketch.circles().size(), -1),
+          m_arcVar(sketch.arcs().size(), -1) {
         int next = 0;
         for (std::size_t i = 0; i < sketch.points().size(); ++i) {
             if (!sketch.pointFixed()[i]) {
@@ -25,16 +27,22 @@ public:
             m_circleVar[i] = next;
             ++next;
         }
+        for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
+            m_arcVar[i] = next;
+            ++next;
+        }
         m_size = next;
     }
 
     int size() const { return m_size; }
     int pointVar(int pointIndex) const { return m_pointVar[static_cast<std::size_t>(pointIndex)]; }
     int circleVar(int circleIndex) const { return m_circleVar[static_cast<std::size_t>(circleIndex)]; }
+    int arcVar(int arcIndex) const { return m_arcVar[static_cast<std::size_t>(arcIndex)]; }
 
 private:
     std::vector<int> m_pointVar;
     std::vector<int> m_circleVar;
+    std::vector<int> m_arcVar;
     int m_size = 0;
 };
 
@@ -51,6 +59,10 @@ std::vector<double> initialVector(const Sketch& sketch, const VariableMap& vars)
         const int v = vars.circleVar(static_cast<int>(i));
         if (v >= 0) x[static_cast<std::size_t>(v)] = sketch.circles()[i].radius;
     }
+    for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
+        const int v = vars.arcVar(static_cast<int>(i));
+        if (v >= 0) x[static_cast<std::size_t>(v)] = sketch.arcs()[i].radius;
+    }
     return x;
 }
 
@@ -62,6 +74,10 @@ void applyVector(Sketch& sketch, const VariableMap& vars, const std::vector<doub
     for (std::size_t i = 0; i < sketch.circles().size(); ++i) {
         const int v = vars.circleVar(static_cast<int>(i));
         if (v >= 0) sketch.circles()[i].radius = x[static_cast<std::size_t>(v)];
+    }
+    for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
+        const int v = vars.arcVar(static_cast<int>(i));
+        if (v >= 0) sketch.arcs()[i].radius = x[static_cast<std::size_t>(v)];
     }
 }
 
@@ -75,6 +91,12 @@ double radiusAt(const Sketch& sketch, const VariableMap& vars, int index, const 
     const int v = vars.circleVar(index);
     if (v >= 0) return x[static_cast<std::size_t>(v)];
     return sketch.circles()[static_cast<std::size_t>(index)].radius;
+}
+
+double arcRadiusAt(const Sketch& sketch, const VariableMap& vars, int index, const std::vector<double>& x) {
+    const int v = vars.arcVar(index);
+    if (v >= 0) return x[static_cast<std::size_t>(v)];
+    return sketch.arcs()[static_cast<std::size_t>(index)].radius;
 }
 
 // Perpendicular distance from c to the infinite line through p1-p2.
@@ -151,7 +173,34 @@ std::vector<double> computeResidual(const Sketch& sketch, const VariableMap& var
             r.push_back(pointToLineDistance(p1, p2, center) - radius);
             break;
         }
+        case SketchConstraintType::ArcRadius: {
+            r.push_back(arcRadiusAt(sketch, vars, c.geomA, x) - c.value);
+            break;
         }
+        case SketchConstraintType::TangentCircleCircle: {
+            const SketchCircle& a = sketch.circles()[static_cast<std::size_t>(c.geomA)];
+            const SketchCircle& b = sketch.circles()[static_cast<std::size_t>(c.geomB)];
+            const Point2D centerA = pointAt(sketch, vars, a.center, x);
+            const Point2D centerB = pointAt(sketch, vars, b.center, x);
+            const double radiusA = radiusAt(sketch, vars, c.geomA, x);
+            const double radiusB = radiusAt(sketch, vars, c.geomB, x);
+            r.push_back(centerA.distanceTo(centerB) - (radiusA + radiusB));
+            break;
+        }
+        }
+    }
+
+    // Every arc's start/end must stay exactly radius away from its center
+    // -- not a constraint the user can add or remove, the same way a
+    // circle's own shape isn't (see SketchArc's own comment).
+    for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
+        const SketchArc& arc = sketch.arcs()[i];
+        const Point2D center = pointAt(sketch, vars, arc.center, x);
+        const Point2D start = pointAt(sketch, vars, arc.start, x);
+        const Point2D end = pointAt(sketch, vars, arc.end, x);
+        const double radius = arcRadiusAt(sketch, vars, static_cast<int>(i), x);
+        r.push_back(start.distanceTo(center) - radius);
+        r.push_back(end.distanceTo(center) - radius);
     }
     return r;
 }
@@ -168,7 +217,11 @@ SolveResult solveSketch(Sketch& sketch, int maxIterations, double tolerance) {
     SolveResult result;
     const VariableMap vars(sketch);
     const int n = vars.size();
-    const int m = static_cast<int>(sketch.constraints().size());
+    // Every arc contributes 2 always-on internal-consistency residuals
+    // (start/end pinned to its own radius around its center) in addition
+    // to whatever explicit constraints exist -- see computeResidual's own
+    // arc loop, which computeResidual's return size must always match.
+    const int m = static_cast<int>(sketch.constraints().size()) + 2 * static_cast<int>(sketch.arcs().size());
 
     if (n == 0 || m == 0) {
         result.converged = true;

@@ -17,10 +17,10 @@
 class SketchView : public QWidget {
     Q_OBJECT
 public:
-    enum class Tool { Select, Line, Circle };
+    enum class Tool { Select, Line, Circle, Arc };
 
     struct Selection {
-        enum class Kind { Point, Line, Circle };
+        enum class Kind { Point, Line, Circle, Arc };
         Kind kind;
         int index;
     };
@@ -63,6 +63,12 @@ private:
     Tool m_tool = Tool::Select;
     std::vector<Selection> m_selection;
     std::optional<int> m_pendingLineStart;
+    // Arc tool: 3 clicks (center, start, end) -- ccw is always true for a
+    // freshly drawn arc in this pass (a real, disclosed simplification;
+    // there's no direction-flip action yet, matching how far this
+    // session's other "minimal but real" UI passes were scoped).
+    std::optional<int> m_pendingArcCenter;
+    std::optional<int> m_pendingArcStart;
     double m_scale = 15.0;
     QPointF m_panOffset{0.0, 0.0};
 };

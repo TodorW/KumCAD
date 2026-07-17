@@ -8,11 +8,8 @@
 class SketchView;
 class QLabel;
 
-// Phase 2 Sprint 2's sketch editor: draw lines/circles, select geometry,
-// apply constraints, see the solver resolve live. Scoped exactly to what
-// SketchView + the constraint solver actually support -- no arcs, no
-// circle-circle tangency (see core/sketch/SketchGeometry.h's own
-// disclosures).
+// Phase 2 Sprint 2's sketch editor: draw lines/circles/arcs, select
+// geometry, apply constraints, see the solver resolve live.
 class SketchEditorDialog : public QDialog {
     Q_OBJECT
 public:
@@ -29,6 +26,8 @@ private:
     void applyTangent();
     void applyDistance();
     void applyRadius();
+    void applyArcRadius();
+    void applyCircleCircleTangent();
     void toggleConstruction();
 
     // Resolves the current selection to exactly one selected line's index,
@@ -40,6 +39,8 @@ private:
     std::optional<std::pair<int, int>> twoPointsForDistance();
     std::optional<int> oneSelectedCircle();
     std::optional<std::pair<int, int>> lineAndCircle();
+    std::optional<int> oneSelectedArc();
+    std::optional<std::pair<int, int>> twoSelectedCircles();
 
     SketchView* m_view = nullptr;
     QLabel* m_statusLabel = nullptr;

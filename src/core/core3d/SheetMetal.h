@@ -10,12 +10,11 @@ namespace lcad {
 
 // A sheet-metal part as a strip of constant width/thickness, described by
 // its NEUTRAL-AXIS path: a sequence of flat runs separated by bends. This
-// is a deliberate, disclosed simplification -- real sheet-metal tools
-// (SolidWorks Sheet Metal, FreeCAD's SheetMetal workbench) let you flange
-// off an arbitrary selected edge of an arbitrary solid; this models the
-// common case directly (a single strip folded into an L/U/Z/hat-channel
-// bracket) rather than needing face/edge selection in the still-unverified
-// 3D viewport (the same kind of scope cut Sprint 3's Fillet/Chamfer made).
+// remains a deliberate, disclosed simplification for building a whole part
+// from scratch in one shot -- for adding ONE more wall onto an EXISTING
+// solid (what real tools call a "Flange"/"Wall" feature), see
+// buildFaceFlange below instead, which does use real edge/face picking
+// (Pick3D.h) now that that infrastructure exists.
 //
 // flatLengths.size() must equal bendAngles.size() + 1 (N flats, N-1 bends
 // between them). Bend angles are in degrees; positive turns the strip's
@@ -52,5 +51,27 @@ double flatPatternLength(const SheetMetalPart& part);
 // position along that unfolded length -- matching how real fabrication
 // drawings mark where to bend flat stock.
 void insertFlatPatternIntoDocument(Document& doc2d, const SheetMetalPart& part, double offsetX, double offsetY);
+
+// Adds a new flat wall ("Flange"/"Wall" in real sheet-metal tools) onto
+// target, extending from edgeIndex's edge (numbered the same way Pick3D.h's
+// pickEdge does), spanning that edge's own length, extruded by length in a
+// direction determined by bendAngleDegrees measured from referenceFaceIndex
+// (numbered the same way pickFace's faceIndex does): 0 degrees continues
+// coplanar with that face, 90 degrees rises perpendicular to it (the
+// common right-angle-flange case), matching the intuitive parametrization
+// real sheet-metal tools use for this same operation. thickness is passed
+// explicitly rather than measured from target (detecting "the" thickness
+// of an arbitrary solid is a much harder, separate problem, out of scope
+// here) -- pass the same thickness the rest of the part uses. The new
+// wall is fused flat (a sharp corner, no bend-radius fillet) onto target;
+// if a rounded bend is wanted, pick the new seam edge afterward (via
+// Pick3D.h/Window3D's "List Edges...") and apply a real Fillet feature to
+// it -- reusing that existing capability rather than duplicating bend-
+// radius logic here. Returns a null shape if target is null, the indices
+// are out of range, length/thickness are non-positive, or the picked
+// edge/face geometry is too degenerate to resolve a flange direction from
+// (e.g. the edge's midpoint coincides with the face's own centroid).
+TopoDS_Shape buildFaceFlange(const TopoDS_Shape& target, int edgeIndex, int referenceFaceIndex, double length,
+                             double bendAngleDegrees, double thickness);
 
 } // namespace lcad

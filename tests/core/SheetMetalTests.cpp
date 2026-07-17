@@ -1,7 +1,9 @@
+#include "core/core3d/Pick3D.h"
 #include "core/core3d/SheetMetal.h"
 #include "core/document/Document.h"
 
 #include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <GProp_GProps.hxx>
 
 #include <catch2/catch_approx.hpp>
@@ -118,4 +120,71 @@ TEST_CASE("insertFlatPatternIntoDocument bakes the rectangle and one bend line p
         if (e->linetypeOverride().has_value() && *e->linetypeOverride() == LineType::Center) ++centerlineCount;
     }
     REQUIRE(centerlineCount == 1);
+}
+
+namespace {
+double volumeOfShape(const TopoDS_Shape& shape) {
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(shape, props);
+    return props.Mass();
+}
+} // namespace
+
+TEST_CASE("buildFaceFlange at 90 degrees adds an exactly-additive perpendicular wall", "[core3d][sheetmetal][flange]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 2.0).Shape();
+
+    PickRay topRay;
+    topRay.origin = {10.0, 5.0, 100.0};
+    topRay.direction = {0.0, 0.0, -1.0};
+    const auto topFace = pickFace(box, topRay);
+    REQUIRE(topFace.has_value());
+
+    PickRay edgeRay;
+    edgeRay.origin = {10.0, -0.1, 2.0};
+    edgeRay.direction = {0.0, 1.0, 0.0};
+    const auto edge = pickEdge(box, edgeRay, 0.5);
+    REQUIRE(edge.has_value());
+
+    const TopoDS_Shape flanged = buildFaceFlange(box, edge->edgeIndex, topFace->faceIndex, 5.0, 90.0, 2.0);
+    REQUIRE_FALSE(flanged.IsNull());
+
+    // A 90-degree flange rising perpendicular from the picked edge is
+    // geometrically disjoint from the original box (they only share a
+    // zero-volume seam), so the fused volume is exactly additive: the
+    // 20x10x2 box plus a 20 (edge length) x 5 (flange length) x 2
+    // (thickness) wall.
+    const double expected = 20.0 * 10.0 * 2.0 + 20.0 * 5.0 * 2.0;
+    REQUIRE(volumeOfShape(flanged) == Approx(expected).margin(1e-3));
+}
+
+TEST_CASE("buildFaceFlange at 0 degrees (coplanar continuation) is also exactly additive",
+          "[core3d][sheetmetal][flange]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 2.0).Shape();
+
+    PickRay topRay;
+    topRay.origin = {10.0, 5.0, 100.0};
+    topRay.direction = {0.0, 0.0, -1.0};
+    const auto topFace = pickFace(box, topRay);
+    REQUIRE(topFace.has_value());
+
+    PickRay edgeRay;
+    edgeRay.origin = {10.0, -0.1, 2.0};
+    edgeRay.direction = {0.0, 1.0, 0.0};
+    const auto edge = pickEdge(box, edgeRay, 0.5);
+    REQUIRE(edge.has_value());
+
+    const TopoDS_Shape flanged = buildFaceFlange(box, edge->edgeIndex, topFace->faceIndex, 5.0, 0.0, 2.0);
+    REQUIRE_FALSE(flanged.IsNull());
+
+    const double expected = 20.0 * 10.0 * 2.0 + 20.0 * 5.0 * 2.0;
+    REQUIRE(volumeOfShape(flanged) == Approx(expected).margin(1e-3));
+}
+
+TEST_CASE("buildFaceFlange rejects invalid input", "[core3d][sheetmetal][flange]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 2.0).Shape();
+    REQUIRE(buildFaceFlange(TopoDS_Shape(), 0, 0, 5.0, 90.0, 2.0).IsNull());
+    REQUIRE(buildFaceFlange(box, 999, 0, 5.0, 90.0, 2.0).IsNull());  // bad edge index
+    REQUIRE(buildFaceFlange(box, 0, 999, 5.0, 90.0, 2.0).IsNull());  // bad face index
+    REQUIRE(buildFaceFlange(box, 0, 0, 0.0, 90.0, 2.0).IsNull());    // non-positive length
+    REQUIRE(buildFaceFlange(box, 0, 0, 5.0, 90.0, 0.0).IsNull());    // non-positive thickness
 }

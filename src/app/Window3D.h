@@ -56,6 +56,9 @@ private:
     // pattern to a new 2D drawing.
     void addSheetMetalPart();
     void exportFlatPattern();
+    // Adds a real face-based flange (see SheetMetal.h's buildFaceFlange)
+    // onto the currently-selected feature's shape.
+    void addFaceFlange();
 
     // Phase 3.3: a BIM model lives alongside the feature tree rather than
     // inside it (walls/openings/slabs aren't Feature3D types) -- its

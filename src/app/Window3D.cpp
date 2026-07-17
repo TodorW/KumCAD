@@ -9,6 +9,7 @@
 #include "core/core3d/Commands3D.h"
 #include "core/core3d/Fem.h"
 #include "core/core3d/Persistence3D.h"
+#include "core/core3d/Pick3D.h"
 #include "core/core3d/Piping.h"
 #include "core/core3d/StepIges.h"
 #include "core/core3d/TechDraw.h"
@@ -249,6 +250,85 @@ private:
     QDoubleSpinBox* m_kFactor;
     QLineEdit* m_flatLengths;
     QLineEdit* m_bendAngles;
+};
+
+// Two rays (an edge pick, a reference-face pick, see Pick3D.h) plus the
+// flange's own length/angle/thickness -- rays are typed in rather than
+// live-clicked, the same "typed-in ray, real picked geometry" precedent
+// AssemblyWindow's own PickRayDialog set.
+class FaceFlangeDialog : public QDialog {
+public:
+    explicit FaceFlangeDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle(QStringLiteral("Add Face Flange"));
+        auto* form = new QFormLayout(this);
+
+        m_edgeOx = makeSpin(0.0); m_edgeOy = makeSpin(0.0); m_edgeOz = makeSpin(100.0);
+        form->addRow(QStringLiteral("Edge-Pick Ray Origin X/Y/Z:"), rowOf({m_edgeOx, m_edgeOy, m_edgeOz}));
+        m_edgeDx = makeSpin(0.0); m_edgeDy = makeSpin(0.0); m_edgeDz = makeSpin(-1.0);
+        form->addRow(QStringLiteral("Edge-Pick Ray Direction X/Y/Z:"), rowOf({m_edgeDx, m_edgeDy, m_edgeDz}));
+
+        m_faceOx = makeSpin(0.0); m_faceOy = makeSpin(0.0); m_faceOz = makeSpin(100.0);
+        form->addRow(QStringLiteral("Face-Pick Ray Origin X/Y/Z:"), rowOf({m_faceOx, m_faceOy, m_faceOz}));
+        m_faceDx = makeSpin(0.0); m_faceDy = makeSpin(0.0); m_faceDz = makeSpin(-1.0);
+        form->addRow(QStringLiteral("Face-Pick Ray Direction X/Y/Z:"), rowOf({m_faceDx, m_faceDy, m_faceDz}));
+
+        m_length = new QDoubleSpinBox(this);
+        m_length->setRange(0.1, 1e6);
+        m_length->setValue(20.0);
+        form->addRow(QStringLiteral("Flange Length:"), m_length);
+        m_bendAngle = new QDoubleSpinBox(this);
+        m_bendAngle->setRange(-180.0, 180.0);
+        m_bendAngle->setValue(90.0);
+        form->addRow(QStringLiteral("Bend Angle (deg, 0=coplanar, 90=perpendicular):"), m_bendAngle);
+        m_thickness = new QDoubleSpinBox(this);
+        m_thickness->setRange(0.01, 1e6);
+        m_thickness->setDecimals(3);
+        m_thickness->setValue(2.0);
+        form->addRow(QStringLiteral("Thickness:"), m_thickness);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        form->addRow(buttons);
+    }
+
+    lcad::PickRay edgeRay() const {
+        lcad::PickRay r;
+        r.origin = {m_edgeOx->value(), m_edgeOy->value(), m_edgeOz->value()};
+        r.direction = {m_edgeDx->value(), m_edgeDy->value(), m_edgeDz->value()};
+        return r;
+    }
+    lcad::PickRay faceRay() const {
+        lcad::PickRay r;
+        r.origin = {m_faceOx->value(), m_faceOy->value(), m_faceOz->value()};
+        r.direction = {m_faceDx->value(), m_faceDy->value(), m_faceDz->value()};
+        return r;
+    }
+    double length() const { return m_length->value(); }
+    double bendAngle() const { return m_bendAngle->value(); }
+    double thickness() const { return m_thickness->value(); }
+
+private:
+    QDoubleSpinBox* makeSpin(double value) {
+        auto* spin = new QDoubleSpinBox(this);
+        spin->setRange(-1e6, 1e6);
+        spin->setDecimals(3);
+        spin->setValue(value);
+        return spin;
+    }
+    QWidget* rowOf(std::initializer_list<QWidget*> widgets) {
+        auto* container = new QWidget(this);
+        auto* layout = new QHBoxLayout(container);
+        layout->setContentsMargins(0, 0, 0, 0);
+        for (QWidget* w : widgets) layout->addWidget(w);
+        return container;
+    }
+
+    QDoubleSpinBox *m_edgeOx, *m_edgeOy, *m_edgeOz, *m_edgeDx, *m_edgeDy, *m_edgeDz;
+    QDoubleSpinBox *m_faceOx, *m_faceOy, *m_faceOz, *m_faceDx, *m_faceDy, *m_faceDz;
+    QDoubleSpinBox* m_length;
+    QDoubleSpinBox* m_bendAngle;
+    QDoubleSpinBox* m_thickness;
 };
 
 class WallDialog : public QDialog {
@@ -597,6 +677,7 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("Add Sheet Metal Part..."), this, &Window3D::addSheetMetalPart);
     fileMenu->addAction(QStringLiteral("Export Flat Pattern..."), this, &Window3D::exportFlatPattern);
+    fileMenu->addAction(QStringLiteral("Add Face Flange..."), this, &Window3D::addFaceFlange);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("BIM: Add Wall..."), this, &Window3D::addBimWall);
     fileMenu->addAction(QStringLiteral("BIM: Add Door/Window..."), this, &Window3D::addBimOpening);
@@ -999,6 +1080,52 @@ void Window3D::exportFlatPattern() {
         return;
     }
     statusBar()->showMessage(QStringLiteral("Flat pattern written to %1").arg(path), 3000);
+}
+
+void Window3D::addFaceFlange() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature to flange"), 3000);
+        return;
+    }
+    const int index = selected[0].row();
+    if (!m_document.isValid(index)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+    const TopoDS_Shape& target = m_document.shapeAt(index);
+
+    FaceFlangeDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const auto edgePick = lcad::pickEdge(target, dialog.edgeRay(), dialog.thickness() * 5.0);
+    if (!edgePick) {
+        QMessageBox::warning(this, QStringLiteral("Pick Failed"), QStringLiteral("Edge-pick ray didn't find an edge."));
+        return;
+    }
+    const auto facePick = lcad::pickFace(target, dialog.faceRay());
+    if (!facePick) {
+        QMessageBox::warning(this, QStringLiteral("Pick Failed"), QStringLiteral("Face-pick ray didn't hit a face."));
+        return;
+    }
+
+    const TopoDS_Shape flanged = lcad::buildFaceFlange(target, edgePick->edgeIndex, facePick->faceIndex,
+                                                       dialog.length(), dialog.bendAngle(), dialog.thickness());
+    if (flanged.IsNull()) {
+        QMessageBox::warning(this, QStringLiteral("Flange Failed"),
+                              QStringLiteral("Could not build a flange from that edge/face pair -- try different "
+                                            "pick rays."));
+        return;
+    }
+
+    const int importIdx = m_document.addImportedShape(flanged);
+    Feature3D feature;
+    feature.type = FeatureType::Imported;
+    feature.name = "Flanged";
+    feature.importIndex = importIdx;
+    m_document.commandStack().execute(std::make_unique<AddFeature3DCommand>(m_document, feature));
+    refreshFeatureList();
+    refreshViewport();
 }
 
 void Window3D::addBimWall() {

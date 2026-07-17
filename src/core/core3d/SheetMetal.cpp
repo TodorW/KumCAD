@@ -2,15 +2,27 @@
 
 #include "core/geometry/Line.h"
 
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Tool.hxx>
+#include <GProp_GProps.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Standard_Failure.hxx>
+#include <TopExp.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
@@ -189,6 +201,87 @@ void insertFlatPatternIntoDocument(Document& doc2d, const SheetMetalPart& part, 
         cumulative += allowance;
         if (i + 1 < part.flatLengths.size()) cumulative += part.flatLengths[i + 1];
     }
+}
+
+TopoDS_Shape buildFaceFlange(const TopoDS_Shape& target, int edgeIndex, int referenceFaceIndex, double length,
+                             double bendAngleDegrees, double thickness) {
+    if (target.IsNull() || length <= 1e-9 || thickness <= 1e-9) return TopoDS_Shape();
+
+    TopTools_IndexedMapOfShape edgeMap;
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(target, TopAbs_EDGE, edgeMap);
+    TopExp::MapShapes(target, TopAbs_FACE, faceMap);
+    if (edgeIndex < 0 || edgeIndex >= edgeMap.Extent()) return TopoDS_Shape();
+    if (referenceFaceIndex < 0 || referenceFaceIndex >= faceMap.Extent()) return TopoDS_Shape();
+
+    const TopoDS_Edge edge = TopoDS::Edge(edgeMap(edgeIndex + 1));
+    const TopoDS_Face face = TopoDS::Face(faceMap(referenceFaceIndex + 1));
+
+    TopoDS_Vertex v1, v2;
+    TopExp::Vertices(edge, v1, v2);
+    if (v1.IsNull() || v2.IsNull()) return TopoDS_Shape();
+    const gp_Pnt p1 = BRep_Tool::Pnt(v1);
+    const gp_Pnt p2 = BRep_Tool::Pnt(v2);
+    const gp_Vec edgeVec(p1, p2);
+    const double edgeLen = edgeVec.Magnitude();
+    if (edgeLen < 1e-9) return TopoDS_Shape();
+    const gp_Dir edgeDir(edgeVec);
+
+    // The reference face's own outward normal at a representative (mid-UV)
+    // point, and its centroid -- both needed to work out which in-plane
+    // direction actually points "away from the face, past the edge" (see
+    // below), the same real ray-picking-adjacent geometry Pick3D.h's
+    // pickFace uses for its own normal.
+    Standard_Real umin = 0, umax = 0, vmin = 0, vmax = 0;
+    BRepTools::UVBounds(face, umin, umax, vmin, vmax);
+    GeomLProp_SLProps props(BRep_Tool::Surface(face), (umin + umax) / 2.0, (vmin + vmax) / 2.0, 1, 1e-6);
+    gp_Dir normal(0, 0, 1);
+    if (props.IsNormalDefined()) normal = props.Normal();
+    if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+
+    GProp_GProps massProps;
+    BRepGProp::SurfaceProperties(face, massProps);
+    const gp_Pnt faceCentroid = massProps.CentreOfMass();
+    const gp_Pnt edgeMid((p1.X() + p2.X()) / 2.0, (p1.Y() + p2.Y()) / 2.0, (p1.Z() + p2.Z()) / 2.0);
+
+    // The in-plane direction pointing from the face's own center toward
+    // the picked edge (and, by continuation, past it into open space) --
+    // found by taking the raw centroid-to-edge vector and stripping out
+    // whatever component it has along the edge itself and along the
+    // face's normal, leaving only the in-plane-perpendicular-to-edge part.
+    gp_Vec tangentVec(faceCentroid, edgeMid);
+    tangentVec -= gp_Vec(edgeDir) * tangentVec.Dot(gp_Vec(edgeDir));
+    tangentVec -= gp_Vec(normal) * tangentVec.Dot(gp_Vec(normal));
+    if (tangentVec.Magnitude() < 1e-9) return TopoDS_Shape(); // degenerate: can't resolve an outward direction
+    const gp_Dir tangent(tangentVec);
+
+    // 0 degrees continues coplanar with the face (along tangent); 90
+    // degrees rises perpendicular to it (along normal) -- see
+    // buildFaceFlange's own header comment for the full convention.
+    const double angleRad = bendAngleDegrees * M_PI / 180.0;
+    const gp_Vec extrusionVec = gp_Vec(tangent) * std::cos(angleRad) + gp_Vec(normal) * std::sin(angleRad);
+    if (extrusionVec.Magnitude() < 1e-9) return TopoDS_Shape();
+    const gp_Dir extrusionDir(extrusionVec);
+
+    gp_Dir thicknessDir;
+    try {
+        thicknessDir = edgeDir.Crossed(extrusionDir);
+    } catch (const Standard_Failure&) {
+        return TopoDS_Shape(); // edgeDir and extrusionDir came out parallel -- degenerate
+    }
+
+    // A box built on this axis system spans local X (=edgeDir) by edgeLen,
+    // local Z (=thicknessDir, the main direction) by thickness, and local
+    // Y -- which gp_Ax2 itself derives as (thicknessDir x edgeDir), proven
+    // to equal extrusionDir exactly here since edgeDir/extrusionDir/
+    // thicknessDir form a right-handed orthonormal set by construction --
+    // by length, so the wall extrudes in exactly the intended direction.
+    const gp_Ax2 flangeAxes(p1, thicknessDir, edgeDir);
+    const TopoDS_Shape flangeBox = BRepPrimAPI_MakeBox(flangeAxes, edgeLen, length, thickness).Shape();
+
+    BRepAlgoAPI_Fuse fuse(target, flangeBox);
+    if (!fuse.IsDone()) return TopoDS_Shape();
+    return fuse.Shape();
 }
 
 } // namespace lcad

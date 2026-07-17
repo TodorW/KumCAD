@@ -11,6 +11,7 @@ add_executable(lcad_core_tests
     GeometryTests.cpp
     DocumentTests.cpp
     ExpressToolsTests.cpp
+    PartLibraryTests.cpp
     CommandStackTests.cpp
     DxfIoTests.cpp
     DwgIoTests.cpp

@@ -23,6 +23,7 @@
 #include "commands/TranCommand.h"
 #include "commands/LengthTuneCommand.h"
 #include "commands/DiffPairCommand.h"
+#include "commands/LibraryCommands.h"
 #include "commands/ExpressToolCommands.h"
 #include "commands/DimAngularCommand.h"
 #include "commands/DimCommand.h"
@@ -789,6 +790,22 @@ void CommandDispatcher::handleCommandText(const QString& text) {
 #endif
     } else if (cmd == QLatin1String("COPPERPOUR")) {
         startCommand(std::make_unique<CopperPourCommand>(m_document, pickTolerance()), QStringLiteral("COPPERPOUR"));
+    } else if (cmd == QLatin1String("LIBSAVE")) {
+        startCommand(std::make_unique<LibSaveCommand>(m_document), QStringLiteral("LIBSAVE"));
+    } else if (cmd == QLatin1String("LIBLOAD")) {
+        startCommand(std::make_unique<LibLoadCommand>(m_document), QStringLiteral("LIBLOAD"));
+    } else if (cmd == QLatin1String("LIBLIST")) {
+        if (m_document.blocks().empty()) {
+            m_commandLine.appendLine(QStringLiteral("*No blocks in this document*"));
+        } else {
+            m_commandLine.appendLine(QStringLiteral("*%1 block(s):*").arg(m_document.blocks().size()));
+            for (const auto& block : m_document.blocks()) {
+                QString tag;
+                if (block->isSymbol()) tag = QStringLiteral(" [symbol]");
+                else if (block->isFootprint()) tag = QStringLiteral(" [footprint]");
+                m_commandLine.appendLine(QStringLiteral("  %1%2").arg(QString::fromStdString(block->name), tag));
+            }
+        }
     } else if (cmd == QLatin1String("TEARDROP")) {
         const auto ids = lcad::addTeardropsToDocument(m_document, m_document.currentLayer());
         m_commandLine.appendLine(QStringLiteral("*Teardrops: %1 added*").arg(ids.size()));

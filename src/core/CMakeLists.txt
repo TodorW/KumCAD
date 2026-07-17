@@ -211,7 +211,9 @@ if(LCAD_ENABLE_3D)
             core3d/Piping.h
             core3d/Piping.cpp
             core3d/Cam3D.h
-            core3d/Cam3D.cpp)
+            core3d/Cam3D.cpp
+            core3d/Fem.h
+            core3d/Fem.cpp)
         message(STATUS "3D modeling core enabled (OpenCASCADE ${OpenCASCADE_VERSION})")
     else()
         message(STATUS "OpenCASCADE not found; building without the 3D modeling core")

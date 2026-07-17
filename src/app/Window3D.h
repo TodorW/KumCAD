@@ -71,6 +71,12 @@ private:
     // document's own tip shapes (see Cam3D.h).
     void generate3DCamToolpath();
 
+    // Phase 3.6: linear-static FEM over the document's own tip shapes (see
+    // Fem.h). Reports summary results (max displacement, max von Mises
+    // stress) via a message box -- no results visualization in the still-
+    // unverified 3D viewport this pass, a disclosed scope cut.
+    void runFemAnalysis();
+
     lcad::Document3D m_document;
     Viewport3D* m_viewport = nullptr;
     QListWidget* m_featureList = nullptr;

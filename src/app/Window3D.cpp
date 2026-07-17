@@ -7,6 +7,7 @@
 
 #include "core/core3d/Cam3D.h"
 #include "core/core3d/Commands3D.h"
+#include "core/core3d/Fem.h"
 #include "core/core3d/Persistence3D.h"
 #include "core/core3d/Piping.h"
 #include "core/core3d/StepIges.h"
@@ -30,12 +31,16 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QSpinBox>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <algorithm>
+#include <cmath>
 
 using lcad::AddFeature3DCommand;
 using lcad::Feature3D;
@@ -461,6 +466,82 @@ private:
     QDoubleSpinBox* m_safeHeight;
 };
 
+class FemDialog : public QDialog {
+public:
+    explicit FemDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle(QStringLiteral("Run FEM Analysis"));
+        auto* form = new QFormLayout(this);
+
+        m_divisions = new QSpinBox(this);
+        m_divisions->setRange(1, 12);
+        m_divisions->setValue(5);
+        form->addRow(QStringLiteral("Mesh Divisions (coarse, single digits):"), m_divisions);
+
+        m_youngsModulus = new QDoubleSpinBox(this);
+        m_youngsModulus->setRange(1.0, 1e7);
+        m_youngsModulus->setValue(200000.0);
+        form->addRow(QStringLiteral("Young's Modulus:"), m_youngsModulus);
+
+        m_poissonsRatio = new QDoubleSpinBox(this);
+        m_poissonsRatio->setRange(0.0, 0.49);
+        m_poissonsRatio->setDecimals(3);
+        m_poissonsRatio->setValue(0.3);
+        form->addRow(QStringLiteral("Poisson's Ratio:"), m_poissonsRatio);
+
+        m_fixedXMax = new QDoubleSpinBox(this);
+        m_fixedXMax->setRange(-1e6, 1e6);
+        m_fixedXMax->setDecimals(3);
+        m_fixedXMax->setValue(0.0);
+        form->addRow(QStringLiteral("Fix every node with X <=:"), m_fixedXMax);
+
+        m_loadPoint = new QLineEdit(QStringLiteral("100,0,0"), this);
+        form->addRow(QStringLiteral("Load Point (x,y,z, nearest node):"), m_loadPoint);
+        m_loadForce = new QLineEdit(QStringLiteral("1000,0,0"), this);
+        form->addRow(QStringLiteral("Load Force Vector (x,y,z):"), m_loadForce);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        form->addRow(buttons);
+    }
+
+    int divisions() const { return m_divisions->value(); }
+
+    lcad::FemMaterial material() const {
+        lcad::FemMaterial material;
+        material.youngsModulus = m_youngsModulus->value();
+        material.poissonsRatio = m_poissonsRatio->value();
+        return material;
+    }
+
+    lcad::FemBoundaryCondition boundaryCondition() const {
+        lcad::FemBoundaryCondition bc;
+        bc.fixedXMax = m_fixedXMax->value();
+        return bc;
+    }
+
+    std::vector<lcad::FemLoad> loads() const {
+        const std::array<double, 3> point = parseTriplet(m_loadPoint->text());
+        const std::array<double, 3> force = parseTriplet(m_loadForce->text());
+        return {lcad::FemLoad{point, force}};
+    }
+
+private:
+    static std::array<double, 3> parseTriplet(const QString& text) {
+        std::array<double, 3> result{0.0, 0.0, 0.0};
+        const QStringList tokens = text.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        for (int i = 0; i < 3 && i < tokens.size(); ++i) result[static_cast<std::size_t>(i)] = tokens[i].trimmed().toDouble();
+        return result;
+    }
+
+    QSpinBox* m_divisions;
+    QDoubleSpinBox* m_youngsModulus;
+    QDoubleSpinBox* m_poissonsRatio;
+    QDoubleSpinBox* m_fixedXMax;
+    QLineEdit* m_loadPoint;
+    QLineEdit* m_loadForce;
+};
+
 } // namespace
 
 Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
@@ -494,6 +575,8 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     fileMenu->addAction(QStringLiteral("Add Pipe Run..."), this, &Window3D::addPipeRun);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("Generate 3D CAM Toolpath..."), this, &Window3D::generate3DCamToolpath);
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("Run FEM Analysis..."), this, &Window3D::runFemAnalysis);
 
     m_viewport = new Viewport3D(this);
     setCentralWidget(m_viewport);
@@ -985,6 +1068,61 @@ void Window3D::generate3DCamToolpath() {
     QString message = QStringLiteral("%1 level(s) written to %2").arg(levels.size()).arg(path);
     if (tipCount > 1) message += QStringLiteral(" (only the first of %1 solids was machined)").arg(tipCount);
     statusBar()->showMessage(message, 5000);
+}
+
+void Window3D::runFemAnalysis() {
+    std::vector<bool> consumed(m_document.features().size(), false);
+    for (const auto& f : m_document.features()) {
+        if (f.inputA >= 0) consumed[static_cast<std::size_t>(f.inputA)] = true;
+        if (f.inputB >= 0) consumed[static_cast<std::size_t>(f.inputB)] = true;
+    }
+    TopoDS_Shape target;
+    for (int i = 0; i < static_cast<int>(m_document.features().size()); ++i) {
+        if (consumed[static_cast<std::size_t>(i)] || !m_document.isValid(i)) continue;
+        target = m_document.shapeAt(i);
+        break;
+    }
+    if (target.IsNull()) {
+        statusBar()->showMessage(QStringLiteral("No solids to analyze yet"), 3000);
+        return;
+    }
+
+    FemDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const lcad::FemMesh mesh = lcad::buildVoxelMesh(target, dialog.divisions());
+    if (mesh.tets.empty()) {
+        QMessageBox::warning(this, QStringLiteral("Meshing Failed"),
+                              QStringLiteral("No tetrahedra were generated -- check the mesh divisions against "
+                                            "the part's size."));
+        return;
+    }
+
+    const lcad::FemResult result =
+        lcad::solveLinearStatic(mesh, dialog.material(), dialog.boundaryCondition(), dialog.loads());
+    if (!result.solved) {
+        QMessageBox::warning(this, QStringLiteral("Analysis Failed"),
+                              QStringLiteral("The system could not be solved -- check that enough nodes are "
+                                            "fixed (an unconstrained model has rigid-body freedom)."));
+        return;
+    }
+
+    double maxDisplacement = 0.0;
+    for (const auto& d : result.displacements) {
+        maxDisplacement = std::max(maxDisplacement, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
+    }
+    double maxStress = 0.0;
+    for (double vm : result.vonMisesStress) maxStress = std::max(maxStress, vm);
+
+    QMessageBox::information(this, QStringLiteral("FEM Analysis Complete"),
+                              QStringLiteral("Mesh: %1 nodes, %2 tetrahedra\nMax displacement magnitude: %3\n"
+                                            "Max von Mises stress: %4\n\n"
+                                            "(A coarse voxel mesh with no results visualization in the 3D "
+                                            "viewport yet -- see Fem.h for the disclosed scope of this pass.)")
+                                  .arg(mesh.nodes.size())
+                                  .arg(mesh.tets.size())
+                                  .arg(maxDisplacement)
+                                  .arg(maxStress));
 }
 
 void Window3D::addPipeRun() {

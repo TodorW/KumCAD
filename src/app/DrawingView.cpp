@@ -33,6 +33,12 @@ const QColor kGripColor(0, 180, 255);
 DrawingView::DrawingView(lcad::Document& document, QWidget* parent) : QOpenGLWidget(parent), m_document(document) {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    // AutoCAD's own crosshair is drawn by the app, not the OS pointer --
+    // the blank cursor here plus the edge-to-edge crosshair paintEvent
+    // draws (see drawCrosshair below) replace the small 20px reticle a
+    // visible OS arrow used to sit on top of, which read as cluttered/
+    // "not like AutoCAD" next to the real thing.
+    setCursor(Qt::BlankCursor);
 }
 
 lcad::Point2D DrawingView::screenToWorld(const QPointF& screen) const {
@@ -501,12 +507,7 @@ void DrawingView::paintEvent(QPaintEvent*) {
         drawTrackingGuides(painter);
         drawSnapMarker(painter);
         drawDynamicInput(painter);
-        if (m_lastMouseWorld) {
-            const QPointF c = worldToScreen(*m_lastMouseWorld);
-            painter.setPen(QPen(QColor(120, 120, 120), 1));
-            painter.drawLine(QPointF(c.x() - 10, c.y()), QPointF(c.x() + 10, c.y()));
-            painter.drawLine(QPointF(c.x(), c.y() - 10), QPointF(c.x(), c.y() + 10));
-        }
+        drawCrosshair(painter, QColor(150, 150, 150));
         return;
     }
 
@@ -555,13 +556,24 @@ void DrawingView::paintEvent(QPaintEvent*) {
     drawTrackingGuides(painter);
     drawSnapMarker(painter);
     drawDynamicInput(painter);
+    drawCrosshair(painter, QColor(200, 200, 200));
+}
 
-    if (m_lastMouseWorld) {
-        const QPointF c = worldToScreen(*m_lastMouseWorld);
-        painter.setPen(QPen(QColor(200, 200, 200), 1));
-        painter.drawLine(QPointF(c.x() - 10, c.y()), QPointF(c.x() + 10, c.y()));
-        painter.drawLine(QPointF(c.x(), c.y() - 10), QPointF(c.x(), c.y() + 10));
-    }
+void DrawingView::drawCrosshair(QPainter& painter, const QColor& color) {
+    if (!m_lastMouseWorld) return;
+    const QPointF c = worldToScreen(*m_lastMouseWorld);
+
+    painter.setPen(QPen(color, 1));
+    // Edge-to-edge, AutoCAD's own default crosshair -- not a small fixed-
+    // length reticle, which reads as a generic app cursor rather than a
+    // drafting crosshair.
+    painter.drawLine(QPointF(0, c.y()), QPointF(width(), c.y()));
+    painter.drawLine(QPointF(c.x(), 0), QPointF(c.x(), height()));
+
+    // The pickbox: AutoCAD's small square marking the object-selection
+    // hit area, centered on the crosshair.
+    constexpr double kPickboxHalf = 4.0;
+    painter.drawRect(QRectF(c.x() - kPickboxHalf, c.y() - kPickboxHalf, kPickboxHalf * 2.0, kPickboxHalf * 2.0));
 }
 
 double DrawingView::gridSpacing() const {

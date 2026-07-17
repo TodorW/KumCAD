@@ -1,8 +1,10 @@
 #include "IconFactory.h"
 
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QPolygonF>
 
 #include <functional>
 
@@ -372,27 +374,67 @@ QIcon modeOtherIcon() {
 }
 
 QIcon appIcon() {
-    constexpr int size = 64;
+    // Rendered at 256 and let Qt downscale for smaller uses (taskbar,
+    // window icon, welcome screen) -- crisper than the old 64px canvas at
+    // any of those sizes.
+    constexpr int size = 256;
     QPixmap pixmap(size, size);
     pixmap.fill(Qt::transparent);
 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
 
+    // A richer two-tone diagonal gradient rather than a flat fill --
+    // reads as a real app icon, not a placeholder swatch.
+    QLinearGradient bg(0, 0, size, size);
+    bg.setColorAt(0.0, QColor(52, 128, 224));
+    bg.setColorAt(1.0, QColor(24, 68, 140));
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(45, 110, 200));
-    painter.drawRoundedRect(QRectF(2, 2, size - 4, size - 4), 12, 12);
+    painter.setBrush(bg);
+    const double margin = size * 0.03125; // 8px at 256
+    const double radius = size * 0.1875;  // 48px at 256
+    painter.drawRoundedRect(QRectF(margin, margin, size - 2 * margin, size - 2 * margin), radius, radius);
 
-    // A compass/drafting motif: a circle (the drawn arc) crossed by a
-    // straightedge, evoking CAD without trying to be a literal logo.
-    QPen pen(Qt::white, 4.0);
-    pen.setCapStyle(Qt::RoundCap);
-    pen.setJoinStyle(Qt::RoundJoin);
-    painter.setPen(pen);
+    // The mark: an isometric cube, evoking 3D modeling (KumCAD's own
+    // expansion past pure 2D drafting) while staying legible as a plain
+    // geometric shape at small sizes -- unlike the old compass/
+    // straightedge motif, which read as a generic "circle and a line"
+    // once scaled down to a taskbar icon.
+    // Standard isometric cube construction: a top vertex, two shoulders
+    // (top face's left/right corners), a front-center vertex (where all
+    // three faces meet), two lower corners, and a bottom vertex.
+    const QPointF center(size / 2.0, size / 2.0 + size * 0.02);
+    const double edgeX = size * 0.195;    // horizontal half-width of a face
+    const double edgeYDown = size * 0.195; // vertical drop of a face's diagonal edge
+
+    const QPointF T(center.x(), center.y() - edgeYDown * 1.4);
+    const QPointF Lh(center.x() - edgeX, center.y() - edgeYDown * 0.4);
+    const QPointF Rh(center.x() + edgeX, center.y() - edgeYDown * 0.4);
+    const QPointF Fc(center.x(), center.y() + edgeYDown * 0.2);
+    const QPointF Ll(center.x() - edgeX, center.y() + edgeYDown * 1.0);
+    const QPointF Rl(center.x() + edgeX, center.y() + edgeYDown * 1.0);
+    const QPointF Bt(center.x(), center.y() + edgeYDown * 1.8);
+
+    const QPolygonF topFace({T, Lh, Fc, Rh});
+    const QPolygonF leftFace({Lh, Fc, Bt, Ll});
+    const QPolygonF rightFace({Rh, Fc, Bt, Rl});
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(255, 255, 255, 235)); // top: lightest, catching the light
+    painter.drawPolygon(topFace);
+    painter.setBrush(QColor(255, 255, 255, 140)); // left: mid tone
+    painter.drawPolygon(leftFace);
+    painter.setBrush(QColor(255, 255, 255, 80)); // right: shadowed
+    painter.drawPolygon(rightFace);
+
+    QPen edgePen(QColor(255, 255, 255, 235), size * 0.016);
+    edgePen.setCapStyle(Qt::RoundCap);
+    edgePen.setJoinStyle(Qt::RoundJoin);
+    painter.setPen(edgePen);
     painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(QPointF(size / 2.0, size / 2.0 + 2), 15.0, 15.0);
-    painter.drawLine(QPointF(14, 16), QPointF(50, 16));
-    dot(painter, QPointF(size / 2.0, size / 2.0 + 2));
+    painter.drawPolygon(topFace);
+    painter.drawPolygon(leftFace);
+    painter.drawPolygon(rightFace);
 
     return QIcon(pixmap);
 }

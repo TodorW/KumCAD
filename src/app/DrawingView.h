@@ -132,6 +132,10 @@ private:
     void drawDragPreview(QPainter& painter);
     void drawSelectionBox(QPainter& painter);
     void drawSnapMarker(QPainter& painter);
+    // AutoCAD's own edge-to-edge crosshair + center pickbox, following
+    // m_lastMouseWorld -- replaces the OS cursor entirely (see the
+    // constructor's Qt::BlankCursor).
+    void drawCrosshair(QPainter& painter, const QColor& color);
     // AutoCAD's dynamic input (F12): a small tooltip near the cursor showing
     // absolute coordinates, or distance<angle off the active command's
     // anchor point once it has one (e.g. LINE's second point).

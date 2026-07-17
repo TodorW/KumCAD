@@ -9,6 +9,8 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 
+#include <cmath>
+
 using Kind = SketchView::Selection::Kind;
 using lcad::SketchConstraint;
 using lcad::SketchConstraintType;
@@ -36,6 +38,11 @@ SketchEditorDialog::SketchEditorDialog(QWidget* parent) : QDialog(parent) {
     toolbar->addAction(QStringLiteral("Distance..."), this, &SketchEditorDialog::applyDistance);
     toolbar->addAction(QStringLiteral("Radius..."), this, &SketchEditorDialog::applyRadius);
     toolbar->addAction(QStringLiteral("Arc Radius..."), this, &SketchEditorDialog::applyArcRadius);
+    toolbar->addAction(QStringLiteral("Angle..."), this, &SketchEditorDialog::applyAngle);
+    toolbar->addAction(QStringLiteral("Point On Line"), this, &SketchEditorDialog::applyPointOnLine);
+    toolbar->addAction(QStringLiteral("Point On Circle"), this, &SketchEditorDialog::applyPointOnCircle);
+    toolbar->addAction(QStringLiteral("Midpoint"), this, &SketchEditorDialog::applyMidpoint);
+    toolbar->addAction(QStringLiteral("Symmetric"), this, &SketchEditorDialog::applySymmetric);
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Toggle Construction"), this, &SketchEditorDialog::toggleConstruction);
     layout->addWidget(toolbar);
@@ -113,6 +120,47 @@ std::optional<std::pair<int, int>> SketchEditorDialog::twoSelectedCircles() {
         return std::make_pair(sel[0].index, sel[1].index);
     }
     m_statusLabel->setText(QStringLiteral("Select exactly two circles first"));
+    return std::nullopt;
+}
+
+std::optional<std::pair<int, int>> SketchEditorDialog::pointAndLine() {
+    const auto& sel = m_view->selection();
+    if (sel.size() == 2) {
+        if (sel[0].kind == Kind::Point && sel[1].kind == Kind::Line) return std::make_pair(sel[0].index, sel[1].index);
+        if (sel[0].kind == Kind::Line && sel[1].kind == Kind::Point) return std::make_pair(sel[1].index, sel[0].index);
+    }
+    m_statusLabel->setText(QStringLiteral("Select one point and one line first"));
+    return std::nullopt;
+}
+
+std::optional<std::pair<int, int>> SketchEditorDialog::pointAndCircle() {
+    const auto& sel = m_view->selection();
+    if (sel.size() == 2) {
+        if (sel[0].kind == Kind::Point && sel[1].kind == Kind::Circle) return std::make_pair(sel[0].index, sel[1].index);
+        if (sel[0].kind == Kind::Circle && sel[1].kind == Kind::Point) return std::make_pair(sel[1].index, sel[0].index);
+    }
+    m_statusLabel->setText(QStringLiteral("Select one point and one circle first"));
+    return std::nullopt;
+}
+
+std::optional<std::tuple<int, int, int>> SketchEditorDialog::twoPointsAndLine() {
+    const auto& sel = m_view->selection();
+    if (sel.size() == 3) {
+        int p1 = -1, p2 = -1, line = -1;
+        int pointCount = 0, lineCount = 0;
+        for (const auto& s : sel) {
+            if (s.kind == Kind::Point) {
+                if (pointCount == 0) p1 = s.index;
+                else p2 = s.index;
+                ++pointCount;
+            } else if (s.kind == Kind::Line) {
+                line = s.index;
+                ++lineCount;
+            }
+        }
+        if (pointCount == 2 && lineCount == 1) return std::make_tuple(p1, p2, line);
+    }
+    m_statusLabel->setText(QStringLiteral("Select exactly two points and one line (the symmetry axis) first"));
     return std::nullopt;
 }
 
@@ -231,6 +279,67 @@ void SketchEditorDialog::applyArcRadius() {
     c.type = SketchConstraintType::ArcRadius;
     c.geomA = *arc;
     c.value = value;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyAngle() {
+    const auto lines = twoSelectedLines();
+    if (!lines) return;
+    bool ok = false;
+    const double degrees = QInputDialog::getDouble(this, QStringLiteral("Angle"), QStringLiteral("Value (degrees):"),
+                                                    90.0, -360.0, 360.0, 3, &ok);
+    if (!ok) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::Angle;
+    c.geomA = lines->first;
+    c.geomB = lines->second;
+    c.value = degrees * M_PI / 180.0;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyPointOnLine() {
+    const auto pair = pointAndLine();
+    if (!pair) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::PointOnLine;
+    c.geomA = pair->second;
+    c.pointA = pair->first;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyPointOnCircle() {
+    const auto pair = pointAndCircle();
+    if (!pair) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::PointOnCircle;
+    c.geomA = pair->second;
+    c.pointA = pair->first;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyMidpoint() {
+    const auto pair = pointAndLine();
+    if (!pair) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::Midpoint;
+    c.geomA = pair->second;
+    c.pointA = pair->first;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applySymmetric() {
+    const auto triple = twoPointsAndLine();
+    if (!triple) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::Symmetric;
+    c.geomA = std::get<2>(*triple);
+    c.pointA = std::get<0>(*triple);
+    c.pointB = std::get<1>(*triple);
     m_view->sketch().addConstraint(c);
     m_view->resolve();
 }

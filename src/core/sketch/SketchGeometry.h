@@ -61,6 +61,17 @@ enum class SketchConstraintType {
     ArcRadius,    // geomA (arc) has radius == value -- how an arc gets dimensioned
     TangentCircleCircle, // geomA, geomB (circles) are externally tangent (distance(centers) == rA + rB) --
                          // internal tangency (one circle inside the other) isn't covered, a disclosed gap
+    Angle,        // angle between geomA, geomB (lines) == value radians -- a general-purpose version of
+                  // Perpendicular/Parallel, same cos-of-the-angle residual form so it shares their
+                  // freedom from atan2's branch discontinuities
+    PointOnLine,  // pointA lies on the infinite line through geomA (a line)'s two points -- for a point
+                  // that needs to slide along a line without structurally sharing its endpoint index
+    PointOnCircle, // pointA lies on geomA (a circle)
+    Midpoint,     // pointA is the midpoint of geomA (a line) -- 2 scalar equations (x and y), unlike
+                  // every other constraint type here
+    Symmetric,    // pointA, pointB are mirror images of each other across geomA (a line, the symmetry
+                  // axis) -- 2 scalar equations: their midpoint lies on the axis, and the segment
+                  // between them is perpendicular to it
 };
 
 struct SketchConstraint {

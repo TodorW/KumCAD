@@ -3,6 +3,7 @@
 #include <QDialog>
 
 #include <optional>
+#include <tuple>
 #include <utility>
 
 class SketchView;
@@ -29,6 +30,11 @@ private:
     void applyArcRadius();
     void applyCircleCircleTangent();
     void toggleConstruction();
+    void applyAngle();
+    void applyPointOnLine();
+    void applyPointOnCircle();
+    void applyMidpoint();
+    void applySymmetric();
 
     // Resolves the current selection to exactly one selected line's index,
     // or nullopt (with a status message) if that's not what's selected.
@@ -41,6 +47,15 @@ private:
     std::optional<std::pair<int, int>> lineAndCircle();
     std::optional<int> oneSelectedArc();
     std::optional<std::pair<int, int>> twoSelectedCircles();
+    // One selected point plus one selected line (in either click order),
+    // point index first -- for PointOnLine and Midpoint.
+    std::optional<std::pair<int, int>> pointAndLine();
+    // One selected point plus one selected circle (in either click order),
+    // point index first -- for PointOnCircle.
+    std::optional<std::pair<int, int>> pointAndCircle();
+    // Two selected points plus one selected line, points first (in
+    // selection order) then the line -- for Symmetric.
+    std::optional<std::tuple<int, int, int>> twoPointsAndLine();
 
     SketchView* m_view = nullptr;
     QLabel* m_statusLabel = nullptr;

@@ -108,6 +108,20 @@ double pointToLineDistance(const Point2D& p1, const Point2D& p2, const Point2D& 
     return std::abs(dir.x * (c.y - p1.y) - dir.y * (c.x - p1.x)) / len;
 }
 
+// Every constraint type contributes exactly 1 scalar residual, except
+// Midpoint and Symmetric which pin down a full 2D relationship (x and y,
+// or on-axis and perpendicular) and so need 2 -- computeResidual, the m
+// count in solveSketch, and analyzeDof must all agree with this.
+int equationCount(SketchConstraintType type) {
+    return (type == SketchConstraintType::Midpoint || type == SketchConstraintType::Symmetric) ? 2 : 1;
+}
+
+int totalEquationCount(const Sketch& sketch) {
+    int total = 0;
+    for (const SketchConstraint& c : sketch.constraints()) total += equationCount(c.type);
+    return total + 2 * static_cast<int>(sketch.arcs().size());
+}
+
 std::vector<double> computeResidual(const Sketch& sketch, const VariableMap& vars, const std::vector<double>& x) {
     std::vector<double> r;
     r.reserve(sketch.constraints().size());
@@ -188,6 +202,57 @@ std::vector<double> computeResidual(const Sketch& sketch, const VariableMap& var
             r.push_back(centerA.distanceTo(centerB) - (radiusA + radiusB));
             break;
         }
+        case SketchConstraintType::Angle: {
+            const SketchLine& la = sketch.lines()[static_cast<std::size_t>(c.geomA)];
+            const SketchLine& lb = sketch.lines()[static_cast<std::size_t>(c.geomB)];
+            const Point2D a1 = pointAt(sketch, vars, la.p1, x), a2 = pointAt(sketch, vars, la.p2, x);
+            const Point2D b1 = pointAt(sketch, vars, lb.p1, x), b2 = pointAt(sketch, vars, lb.p2, x);
+            const Point2D da = a2 - a1, db = b2 - b1;
+            // Same dot-product form Perpendicular uses (a special case at
+            // value == pi/2), scaled by the two lengths so it's a genuine
+            // "cosine of the angle" comparison rather than blowing up with
+            // line length -- avoids atan2's branch-cut discontinuities.
+            r.push_back(da.x * db.x + da.y * db.y - da.length() * db.length() * std::cos(c.value));
+            break;
+        }
+        case SketchConstraintType::PointOnLine: {
+            const SketchLine& line = sketch.lines()[static_cast<std::size_t>(c.geomA)];
+            const Point2D p1 = pointAt(sketch, vars, line.p1, x);
+            const Point2D p2 = pointAt(sketch, vars, line.p2, x);
+            const Point2D p = pointAt(sketch, vars, c.pointA, x);
+            r.push_back(pointToLineDistance(p1, p2, p));
+            break;
+        }
+        case SketchConstraintType::PointOnCircle: {
+            const SketchCircle& circle = sketch.circles()[static_cast<std::size_t>(c.geomA)];
+            const Point2D center = pointAt(sketch, vars, circle.center, x);
+            const Point2D p = pointAt(sketch, vars, c.pointA, x);
+            const double radius = radiusAt(sketch, vars, c.geomA, x);
+            r.push_back(p.distanceTo(center) - radius);
+            break;
+        }
+        case SketchConstraintType::Midpoint: {
+            const SketchLine& line = sketch.lines()[static_cast<std::size_t>(c.geomA)];
+            const Point2D p1 = pointAt(sketch, vars, line.p1, x);
+            const Point2D p2 = pointAt(sketch, vars, line.p2, x);
+            const Point2D p = pointAt(sketch, vars, c.pointA, x);
+            r.push_back(p.x - (p1.x + p2.x) / 2.0);
+            r.push_back(p.y - (p1.y + p2.y) / 2.0);
+            break;
+        }
+        case SketchConstraintType::Symmetric: {
+            const SketchLine& axis = sketch.lines()[static_cast<std::size_t>(c.geomA)];
+            const Point2D axisP1 = pointAt(sketch, vars, axis.p1, x);
+            const Point2D axisP2 = pointAt(sketch, vars, axis.p2, x);
+            const Point2D a = pointAt(sketch, vars, c.pointA, x);
+            const Point2D b = pointAt(sketch, vars, c.pointB, x);
+            const Point2D mid((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            const Point2D axisDir = axisP2 - axisP1;
+            const Point2D ab = b - a;
+            r.push_back(pointToLineDistance(axisP1, axisP2, mid));
+            r.push_back(axisDir.x * ab.x + axisDir.y * ab.y);
+            break;
+        }
         }
     }
 
@@ -222,7 +287,9 @@ SolveResult solveSketch(Sketch& sketch, int maxIterations, double tolerance) {
     // (start/end pinned to its own radius around its center) in addition
     // to whatever explicit constraints exist -- see computeResidual's own
     // arc loop, which computeResidual's return size must always match.
-    const int m = static_cast<int>(sketch.constraints().size()) + 2 * static_cast<int>(sketch.arcs().size());
+    // Most constraint types contribute exactly 1 equation; see
+    // equationCount's own comment for the (disclosed) exceptions.
+    const int m = totalEquationCount(sketch);
 
     if (n == 0 || m == 0) {
         result.converged = true;
@@ -317,7 +384,7 @@ DofReport analyzeDof(const Sketch& sketch) {
     DofReport report;
     const VariableMap vars(sketch);
     report.totalDof = vars.size();
-    report.constraintEquations = static_cast<int>(sketch.constraints().size()) + 2 * static_cast<int>(sketch.arcs().size());
+    report.constraintEquations = totalEquationCount(sketch);
     report.remainingDof = std::max(0, report.totalDof - report.constraintEquations);
     report.likelyOverConstrained = report.constraintEquations > report.totalDof;
     return report;

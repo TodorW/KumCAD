@@ -29,7 +29,7 @@ SolveResult solveSketch(Sketch& sketch, int maxIterations = 100, double toleranc
 
 struct DofReport {
     int totalDof = 0;              // 2*(free points) + (free circle radii) + (free arc radii)
-    int constraintEquations = 0;   // user constraints (each is exactly 1 scalar equation, this codebase's constraint types are all scalar) + 2*(arc count) for the always-on arc radius-consistency equations
+    int constraintEquations = 0;   // user constraints (1 scalar equation each, except Midpoint/Symmetric which are 2 -- see SketchConstraintType's own comment) + 2*(arc count) for the always-on arc radius-consistency equations
     int remainingDof = 0;          // max(0, totalDof - constraintEquations) -- 0 means "no freedom left, at least on a naive count"
     // A necessary, not sufficient, over-constraint signal: constraintEquations
     // > totalDof means the system has strictly more equations than unknowns,

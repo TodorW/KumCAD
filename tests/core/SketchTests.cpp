@@ -4,6 +4,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <cmath>
 
 using namespace lcad;
@@ -259,4 +260,116 @@ TEST_CASE("analyzeDof flags likelyOverConstrained when equations outnumber free 
     REQUIRE(report.constraintEquations == 2);
     REQUIRE(report.remainingDof == 0);
     REQUIRE(report.likelyOverConstrained);
+}
+
+TEST_CASE("solveSketch satisfies a general Angle constraint between two lines", "[sketch][solver]") {
+    Sketch sketch;
+    const int a1 = sketch.addPoint(Point2D(0, 0), true);
+    const int a2 = sketch.addPoint(Point2D(10, 0), true); // fixed, horizontal
+    const int b1 = sketch.addPoint(Point2D(0, 0), true);
+    const int b2 = sketch.addPoint(Point2D(8, 2)); // not yet at 60 degrees from A
+    const int lineA = sketch.addLine(a1, a2);
+    const int lineB = sketch.addLine(b1, b2);
+    SketchConstraint c;
+    c.type = SketchConstraintType::Angle;
+    c.geomA = lineA;
+    c.geomB = lineB;
+    c.value = 60.0 * M_PI / 180.0;
+    sketch.addConstraint(c);
+
+    REQUIRE(solveSketch(sketch).converged);
+    const Point2D dirA = sketch.points()[static_cast<std::size_t>(a2)] - sketch.points()[static_cast<std::size_t>(a1)];
+    const Point2D dirB = sketch.points()[static_cast<std::size_t>(b2)] - sketch.points()[static_cast<std::size_t>(b1)];
+    const double cosAngle = (dirA.x * dirB.x + dirA.y * dirB.y) / (dirA.length() * dirB.length());
+    const double angleDegrees = std::acos(std::clamp(cosAngle, -1.0, 1.0)) * 180.0 / M_PI;
+    REQUIRE(angleDegrees == Approx(60.0).margin(1e-4));
+}
+
+TEST_CASE("solveSketch pins a free point onto a line via PointOnLine", "[sketch][solver]") {
+    Sketch sketch;
+    const int p1 = sketch.addPoint(Point2D(0, 0), true);
+    const int p2 = sketch.addPoint(Point2D(10, 0), true); // fixed horizontal line along y=0
+    const int loose = sketch.addPoint(Point2D(5, 3));     // off the line
+    const int line = sketch.addLine(p1, p2);
+    SketchConstraint c;
+    c.type = SketchConstraintType::PointOnLine;
+    c.geomA = line;
+    c.pointA = loose;
+    sketch.addConstraint(c);
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].y == Approx(0.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch pins a free point onto a circle via PointOnCircle", "[sketch][solver]") {
+    Sketch sketch;
+    const int center = sketch.addPoint(Point2D(0, 0), true);
+    const int circle = sketch.addCircle(center, 5.0);
+    sketch.addConstraint({SketchConstraintType::Radius, circle, -1, -1, -1, 5.0}); // keep the radius fixed at 5
+    const int loose = sketch.addPoint(Point2D(3, 3));                             // distance ~4.24, not on the circle
+    SketchConstraint c;
+    c.type = SketchConstraintType::PointOnCircle;
+    c.geomA = circle;
+    c.pointA = loose;
+    sketch.addConstraint(c);
+
+    REQUIRE(solveSketch(sketch).converged);
+    const Point2D centerPos = sketch.points()[static_cast<std::size_t>(center)];
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].distanceTo(centerPos) == Approx(5.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch pins a free point to a line's midpoint via Midpoint", "[sketch][solver]") {
+    Sketch sketch;
+    const int p1 = sketch.addPoint(Point2D(0, 0), true);
+    const int p2 = sketch.addPoint(Point2D(10, 0), true);
+    const int loose = sketch.addPoint(Point2D(2, 7));
+    const int line = sketch.addLine(p1, p2);
+    SketchConstraint c;
+    c.type = SketchConstraintType::Midpoint;
+    c.geomA = line;
+    c.pointA = loose;
+    sketch.addConstraint(c);
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].x == Approx(5.0).margin(1e-6));
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].y == Approx(0.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch mirrors a free point across an axis line via Symmetric", "[sketch][solver]") {
+    Sketch sketch;
+    // Axis: the Y axis (x == 0).
+    const int axisP1 = sketch.addPoint(Point2D(0, -10), true);
+    const int axisP2 = sketch.addPoint(Point2D(0, 10), true);
+    const int axis = sketch.addLine(axisP1, axisP2);
+    const int fixedPoint = sketch.addPoint(Point2D(3, 2), true);
+    const int loose = sketch.addPoint(Point2D(1, 1)); // should settle at (-3, 2)
+    SketchConstraint c;
+    c.type = SketchConstraintType::Symmetric;
+    c.geomA = axis;
+    c.pointA = fixedPoint;
+    c.pointB = loose;
+    sketch.addConstraint(c);
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].x == Approx(-3.0).margin(1e-6));
+    REQUIRE(sketch.points()[static_cast<std::size_t>(loose)].y == Approx(2.0).margin(1e-6));
+}
+
+TEST_CASE("analyzeDof counts Midpoint and Symmetric as 2 equations each, not 1", "[sketch][dof]") {
+    Sketch sketch;
+    const int p1 = sketch.addPoint(Point2D(0, 0), true);
+    const int p2 = sketch.addPoint(Point2D(10, 0), true);
+    const int loose = sketch.addPoint(Point2D(2, 7));
+    const int line = sketch.addLine(p1, p2);
+    SketchConstraint c;
+    c.type = SketchConstraintType::Midpoint;
+    c.geomA = line;
+    c.pointA = loose;
+    sketch.addConstraint(c);
+
+    const DofReport report = analyzeDof(sketch);
+    REQUIRE(report.totalDof == 2); // the one free point
+    REQUIRE(report.constraintEquations == 2);
+    REQUIRE(report.remainingDof == 0);
+    REQUIRE_FALSE(report.likelyOverConstrained);
 }

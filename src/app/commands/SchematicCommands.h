@@ -79,6 +79,23 @@ private:
     bool m_finished = false;
 };
 
+// BOM: specify an insertion point, then builds a Bill of Materials TABLE
+// there (see core/schematic/Bom.h) -- groups every schematic symbol by
+// (part, value), one row per group.
+class BomCommand : public DrawCommand {
+public:
+    explicit BomCommand(lcad::Document& document) : m_document(document) {}
+
+    QString start() override { return QStringLiteral("BOM  Specify insertion point:"); }
+    std::optional<QString> onPoint(const lcad::Point2D& pt) override;
+    bool isFinished() const override { return m_finished; }
+    void cancel() override { m_finished = true; }
+
+private:
+    lcad::Document& m_document;
+    bool m_finished = false;
+};
+
 // SHEETNEW: creates a new schematic sheet (see core/schematic/Sheets.h) --
 // prompts for a name, then switches to it (a freshly created sheet is the
 // obvious next place to start drawing).

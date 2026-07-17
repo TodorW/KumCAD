@@ -67,6 +67,8 @@ add_library(lcad_core STATIC
     schematic/SymbolLibrary.cpp
     schematic/Sheets.h
     schematic/Sheets.cpp
+    schematic/Bom.h
+    schematic/Bom.cpp
     pcb/Stackup.h
     pcb/Stackup.cpp
     pcb/NetClass.h

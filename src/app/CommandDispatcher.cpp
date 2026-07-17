@@ -730,6 +730,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         emit documentChanged();
     } else if (cmd == QLatin1String("WIRELIST") || cmd == QLatin1String("LINELIST")) {
         startCommand(std::make_unique<WireListCommand>(m_document), QStringLiteral("WIRELIST"));
+    } else if (cmd == QLatin1String("BOM")) {
+        startCommand(std::make_unique<BomCommand>(m_document), QStringLiteral("BOM"));
     } else if (cmd == QLatin1String("SHEETNEW")) {
         startCommand(std::make_unique<SheetNewCommand>(m_document), QStringLiteral("SHEETNEW"));
     } else if (cmd == QLatin1String("SHEETGOTO")) {

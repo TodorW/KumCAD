@@ -26,6 +26,7 @@ add_executable(lcad_core_tests
     StackupTests.cpp
     DocumentConstraintsTests.cpp
     NetClassTests.cpp
+    BomTests.cpp
     SpecctraWriterTests.cpp
     CopperPourTests.cpp
     ElectricalTests.cpp

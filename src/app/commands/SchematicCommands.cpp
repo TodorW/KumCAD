@@ -5,6 +5,7 @@
 #include "core/geometry/NetLabel.h"
 #include "core/geometry/NoConnect.h"
 #include "core/electrical/WireList.h"
+#include "core/schematic/Bom.h"
 #include "core/schematic/Netlist.h"
 #include "core/schematic/Sheets.h"
 
@@ -100,6 +101,15 @@ std::optional<QString> WireListCommand::onPoint(const lcad::Point2D& pt) {
     const std::vector<lcad::Net> nets = lcad::computeNets(m_document);
     lcad::buildWireListTable(m_document, nets, pt);
     return QStringLiteral("*Wire list placed (%1 net(s))*").arg(nets.size());
+}
+
+std::optional<QString> BomCommand::onPoint(const lcad::Point2D& pt) {
+    m_finished = true;
+    const std::vector<lcad::BomRow> rows = lcad::generateBom(m_document);
+    lcad::buildBomTable(m_document, rows, pt);
+    int totalParts = 0;
+    for (const lcad::BomRow& row : rows) totalParts += row.quantity;
+    return QStringLiteral("*BOM placed (%1 row(s), %2 part(s) total)*").arg(rows.size()).arg(totalParts);
 }
 
 std::optional<QString> NetlistExportCommand::onText(const QString& text) {

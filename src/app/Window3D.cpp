@@ -19,9 +19,12 @@
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <gp_Pnt.hxx>
@@ -75,6 +78,7 @@ QString typeName(FeatureType type) {
     case FeatureType::LinearPattern: return QStringLiteral("Linear Pattern");
     case FeatureType::PolarPattern: return QStringLiteral("Polar Pattern");
     case FeatureType::Mirror: return QStringLiteral("Mirror");
+    case FeatureType::Shell: return QStringLiteral("Shell");
     case FeatureType::Imported: return QStringLiteral("Imported");
     }
     return QStringLiteral("Feature");
@@ -932,6 +936,7 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Edit..."), this, &Window3D::editSelectedFeature);
     toolbar->addAction(QStringLiteral("List Edges..."), this, &Window3D::listSelectedFeatureEdges);
+    toolbar->addAction(QStringLiteral("List Faces..."), this, &Window3D::listSelectedFeatureFaces);
     toolbar->addAction(QStringLiteral("New Sketch..."), this, &Window3D::openSketchEditor);
     toolbar->addAction(QStringLiteral("Add Sketch Feature..."), this, &Window3D::addSketchFeature);
     toolbar->addSeparator();
@@ -1053,6 +1058,36 @@ void Window3D::listSelectedFeatureEdges() {
         report += QStringLiteral("%1: (%2, %3, %4)\n").arg(i - 1).arg(mid.X(), 0, 'f', 2).arg(mid.Y(), 0, 'f', 2).arg(mid.Z(), 0, 'f', 2);
     }
     QMessageBox::information(this, QStringLiteral("Feature Edges"), report);
+}
+
+void Window3D::listSelectedFeatureFaces() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature first"), 3000);
+        return;
+    }
+    const int index = selected[0].row();
+    if (!m_document.isValid(index)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(m_document.shapeAt(index), TopAbs_FACE, faceMap);
+
+    QString report = QStringLiteral("%1 face(s) -- index: centroid (x, y, z)\n").arg(faceMap.Extent());
+    for (int i = 1; i <= faceMap.Extent(); ++i) {
+        const TopoDS_Face face = TopoDS::Face(faceMap(i));
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(face, props);
+        const gp_Pnt centroid = props.CentreOfMass();
+        report += QStringLiteral("%1: (%2, %3, %4)\n")
+                    .arg(i - 1)
+                    .arg(centroid.X(), 0, 'f', 2)
+                    .arg(centroid.Y(), 0, 'f', 2)
+                    .arg(centroid.Z(), 0, 'f', 2);
+    }
+    QMessageBox::information(this, QStringLiteral("Feature Faces"), report);
 }
 
 void Window3D::openSketchEditor() {

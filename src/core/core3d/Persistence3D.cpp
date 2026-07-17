@@ -51,7 +51,7 @@ std::string decodeToken(const std::string& s) {
 
 std::string serializeDocument(const Document3D& doc) {
     std::ostringstream out;
-    out << "KCAD3D 1\n";
+    out << "KCAD3D 2\n";
 
     const auto& sketches = doc.sketches();
     out << "SKETCHES " << sketches.size() << "\n";
@@ -84,8 +84,15 @@ std::string serializeDocument(const Document3D& doc) {
         out << f.p1 << " " << f.p2 << " " << f.p3 << " " << f.p4 << "\n";
         out << f.posX << " " << f.posY << " " << f.posZ << "\n";
         out << f.dirX << " " << f.dirY << " " << f.dirZ << "\n";
+        out << f.rotAxisX << " " << f.rotAxisY << " " << f.rotAxisZ << " " << f.rotAngle << "\n";
         out << f.inputA << " " << f.inputB << " " << (f.cutMode ? 1 : 0) << "\n";
         out << f.sketchIndex << " " << f.count << " " << f.importIndex << "\n";
+        out << "EDGEINDICES " << f.edgeIndices.size();
+        for (int edgeIndex : f.edgeIndices) out << " " << edgeIndex;
+        out << "\n";
+        out << "FACEINDICES " << f.faceIndices.size();
+        for (int faceIndex : f.faceIndices) out << " " << faceIndex;
+        out << "\n";
     }
 
     out << "IMPORTEDSHAPES " << doc.importedShapes().size() << "\n";
@@ -109,7 +116,6 @@ bool parseDocumentText(const std::string& text, ParsedDocument3D& parsed) {
     if (!expectTag(in, "KCAD3D")) return false;
     int version = 0;
     in >> version;
-    (void)version; // format version, unused until there's a second one to branch on
     if (!in) return false;
 
     std::size_t sketchCount = 0;
@@ -184,10 +190,34 @@ bool parseDocumentText(const std::string& text, ParsedDocument3D& parsed) {
         in >> f.p1 >> f.p2 >> f.p3 >> f.p4;
         in >> f.posX >> f.posY >> f.posZ;
         in >> f.dirX >> f.dirY >> f.dirZ;
+        // Rotation + per-edge/per-face selection arrived in format version
+        // 2 -- a version-1 file (written before either existed) simply
+        // doesn't have these fields, so Feature3D's own defaults (no
+        // rotation, "every edge"/no shell faces) apply, matching exactly
+        // what that older file actually meant.
+        if (version >= 2) in >> f.rotAxisX >> f.rotAxisY >> f.rotAxisZ >> f.rotAngle;
         int cutMode = 0;
         in >> f.inputA >> f.inputB >> cutMode;
         f.cutMode = cutMode != 0;
         in >> f.sketchIndex >> f.count >> f.importIndex;
+        if (version >= 2) {
+            if (!expectTag(in, "EDGEINDICES")) return false;
+            std::size_t edgeIndexCount = 0;
+            in >> edgeIndexCount;
+            for (std::size_t e = 0; e < edgeIndexCount; ++e) {
+                int edgeIndex = -1;
+                in >> edgeIndex;
+                f.edgeIndices.push_back(edgeIndex);
+            }
+            if (!expectTag(in, "FACEINDICES")) return false;
+            std::size_t faceIndexCount = 0;
+            in >> faceIndexCount;
+            for (std::size_t fc = 0; fc < faceIndexCount; ++fc) {
+                int faceIndex = -1;
+                in >> faceIndex;
+                f.faceIndices.push_back(faceIndex);
+            }
+        }
         if (!in) return false;
         parsed.features.push_back(f);
     }

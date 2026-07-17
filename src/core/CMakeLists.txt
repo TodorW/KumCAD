@@ -198,7 +198,7 @@ if(LCAD_ENABLE_3D)
         # 3D sprints (STEP/IGES, assembly) will extend this list.
         target_link_libraries(lcad_core PUBLIC
             TKernel TKMath TKG2d TKG3d TKGeomBase TKGeomAlgo TKBRep TKTopAlgo
-            TKPrim TKBO TKMesh TKService TKV3d TKOpenGl TKFillet
+            TKPrim TKBO TKMesh TKService TKV3d TKOpenGl TKFillet TKOffset
             TKDESTEP TKDEIGES TKXSBase TKHLR)
         target_compile_definitions(lcad_core PUBLIC LCAD_HAS_OCCT)
         target_sources(lcad_core PRIVATE

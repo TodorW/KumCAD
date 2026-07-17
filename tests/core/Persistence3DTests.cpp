@@ -1,5 +1,6 @@
 #include "core/core3d/Document3D.h"
 #include "core/core3d/Persistence3D.h"
+#include "core/io/Zip.h"
 #include "core/sketch/SketchGeometry.h"
 
 #include <BRepGProp.hxx>
@@ -77,6 +78,83 @@ TEST_CASE("Document3D save/load round-trips a plain primitive/boolean feature tr
     REQUIRE(loaded.findFeature(0)->name == "Base Block");
     REQUIRE(loaded.isValid(2));
     REQUIRE(volumeOf(loaded.shapeAt(2)) == Approx(volumeOf(doc.shapeAt(2))).margin(1e-6));
+}
+
+TEST_CASE("Document3D save/load round-trips rotation, per-edge Fillet selection, and per-face Shell selection",
+         "[core3d][persistence]") {
+    TempPath temp;
+    Document3D doc;
+
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    box.rotAxisX = 0.0;
+    box.rotAxisY = 0.0;
+    box.rotAxisZ = 1.0;
+    box.rotAngle = 45.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D fillet;
+    fillet.type = FeatureType::Fillet;
+    fillet.inputA = boxIdx;
+    fillet.p1 = 2.0;
+    fillet.edgeIndices = {0, 3, 7};
+    const int filletIdx = doc.addFeature(fillet);
+
+    REQUIRE(saveDocument3D(doc, temp.path.string()));
+
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+    REQUIRE(loaded.features().size() == 2);
+
+    const Feature3D* loadedBox = loaded.findFeature(0);
+    REQUIRE(loadedBox);
+    REQUIRE(loadedBox->rotAngle == Approx(45.0));
+    REQUIRE(loadedBox->rotAxisZ == Approx(1.0));
+
+    const Feature3D* loadedFillet = loaded.findFeature(1);
+    REQUIRE(loadedFillet);
+    REQUIRE(loadedFillet->edgeIndices == std::vector<int>{0, 3, 7});
+
+    // The recomputed shape is genuinely the same as the original's (not
+    // just the raw parameters matching) -- if either rotation or the
+    // specific edge selection had been silently dropped, this volume
+    // would differ from the original's.
+    REQUIRE(volumeOf(loaded.shapeAt(filletIdx)) == Approx(volumeOf(doc.shapeAt(filletIdx))).margin(1e-6));
+}
+
+TEST_CASE("loadDocument3D reads an older format-1 file (no rotation/edge/face fields) with sane defaults",
+         "[core3d][persistence]") {
+    TempPath temp;
+    // A hand-built format-1 document.txt, exactly the shape the writer
+    // produced before rotation/edgeIndices/faceIndices existed -- proves
+    // an old save file (which obviously can't have fields that didn't
+    // exist yet) still loads, rather than requiring every user to redo
+    // their old documents.
+    const std::string oldFormatText =
+        "KCAD3D 1\n"
+        "SKETCHES 0\n"
+        "FEATURES 1\n"
+        "0 OldBox\n"
+        "20 20 20 0\n"
+        "0 0 0\n"
+        "0 0 1\n"
+        "-1 -1 0\n"
+        "-1 1 -1\n"
+        "IMPORTEDSHAPES 0\n";
+    REQUIRE(writeZip(temp.path.string(), {{"document.txt", oldFormatText}}));
+
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+    REQUIRE(loaded.features().size() == 1);
+    const Feature3D* feature = loaded.findFeature(0);
+    REQUIRE(feature);
+    REQUIRE(feature->name == "OldBox");
+    REQUIRE(feature->rotAngle == Approx(0.0)); // no rotation field in format 1 -- Feature3D's own default
+    REQUIRE(feature->edgeIndices.empty());
+    REQUIRE(feature->faceIndices.empty());
+    REQUIRE(loaded.isValid(0));
+    REQUIRE(volumeOf(loaded.shapeAt(0)) == Approx(20.0 * 20.0 * 20.0).margin(1e-6));
 }
 
 TEST_CASE("Document3D save/load round-trips a sketch and a Pad feature built from it", "[core3d][persistence]") {

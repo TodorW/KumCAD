@@ -28,6 +28,9 @@ private:
     // work out which index to type into SketchFeatureDialog's Fillet/
     // Chamfer Edge Indices field without live interactive picking.
     void listSelectedFeatureEdges();
+    // Same idea as listSelectedFeatureEdges, for FeatureType::Shell's
+    // faceIndices (see Pick3D.h's pickFace numbering).
+    void listSelectedFeatureFaces();
     void openSketchEditor();
     void addSketchFeature();
     void undo();

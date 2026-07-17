@@ -51,6 +51,12 @@ enum class FeatureType {
                    // (a real Mirror feature keeps both; a plain "replace"
                    // copy would just discard the source, which is rarely
                    // what's wanted)
+    Shell,         // hollows inputA to wall thickness p1, opening it up by
+                   // removing faceIndices (a real Shell/Thickness feature
+                   // needs at least one open face -- a fully sealed hollow
+                   // shell isn't buildable/useful here, so an empty
+                   // faceIndices is invalid, unlike Fillet/Chamfer's
+                   // "empty means every edge" convention)
     Imported,      // a shape read from an external STEP/IGES file (see
                    // StepIges.h) or loaded back from a .kcad3d's embedded
                    // BRep blob (see Persistence3D.h). Has no parametric
@@ -108,6 +114,12 @@ struct Feature3D {
     // Specific edges to round/bevel -- Fillet/Chamfer only. Empty means
     // "every edge" (see FeatureType::Fillet's own comment).
     std::vector<int> edgeIndices;
+
+    // Which faces to remove (open up) -- Shell only. 0-based indices into
+    // TopExp::MapShapes(inputA's shape, TopAbs_FACE, ...)'s ordering, the
+    // same numbering Pick3D.h's pickFace returns -- so a real face pick
+    // can drive this directly, same as edgeIndices does for Fillet/Chamfer.
+    std::vector<int> faceIndices;
 
     static bool isBoolean(FeatureType t) { return t == FeatureType::Union || t == FeatureType::Cut || t == FeatureType::Intersect; }
     bool isBoolean() const { return isBoolean(type); }

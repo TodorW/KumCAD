@@ -8,6 +8,7 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -308,6 +309,36 @@ void Document3D::recomputeOne(int index) {
         chamferBuilder.Build();
         ok = chamferBuilder.IsDone();
         if (ok) shape = chamferBuilder.Shape();
+        break;
+    }
+    case FeatureType::Shell: {
+        if (f.inputA < 0 || f.inputA >= index || !isValid(f.inputA) || f.p1 <= 1e-9) {
+            ok = false;
+            break;
+        }
+        const TopoDS_Shape& target = m_shapes[static_cast<std::size_t>(f.inputA)];
+        TopTools_IndexedMapOfShape faceMap;
+        TopExp::MapShapes(target, TopAbs_FACE, faceMap);
+        TopTools_ListOfShape facesToRemove;
+        for (int faceIndex : f.faceIndices) {
+            if (faceIndex < 0 || faceIndex >= faceMap.Extent()) continue;
+            facesToRemove.Append(faceMap(faceIndex + 1));
+        }
+        // A Shell needs at least one open face -- a fully sealed hollow
+        // shell isn't buildable/useful here (unlike Fillet/Chamfer, whose
+        // empty edgeIndices means "every edge" instead).
+        if (facesToRemove.IsEmpty()) {
+            ok = false;
+            break;
+        }
+        BRepOffsetAPI_MakeThickSolid shellBuilder;
+        // Negated: a positive p1 (the wall thickness the user actually
+        // types) means "hollow inward," matching the sign convention a
+        // real Shell/Thickness tool's UI uses -- OCCT's own offset
+        // direction convention is the opposite of that.
+        shellBuilder.MakeThickSolidByJoin(target, facesToRemove, -f.p1, 1e-3);
+        ok = shellBuilder.IsDone();
+        if (ok) shape = shellBuilder.Shape();
         break;
     }
     case FeatureType::LinearPattern:

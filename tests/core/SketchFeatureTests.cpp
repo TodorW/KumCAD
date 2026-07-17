@@ -214,6 +214,56 @@ TEST_CASE("Document3D Fillet where every edgeIndices entry is out of range is in
     REQUIRE_FALSE(doc.isValid(filletIdx));
 }
 
+TEST_CASE("Document3D Shell hollows a box with one open face to the exact expected volume",
+         "[core3d][shell][pick]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    // Pick the box's top face (straight down from above), the same
+    // mechanism a viewport click would use.
+    PickRay ray;
+    ray.origin = {10.0, 10.0, 50.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto picked = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(picked.has_value());
+
+    Feature3D shell;
+    shell.type = FeatureType::Shell;
+    shell.inputA = boxIdx;
+    shell.p1 = 2.0; // wall thickness
+    shell.faceIndices = {picked->faceIndex};
+    const int shellIdx = doc.addFeature(shell);
+    REQUIRE(doc.isValid(shellIdx));
+
+    // Removing the top face and offsetting the other 5 faces inward by 2
+    // leaves a cavity open at the top: x/y each inset by 2 on both sides
+    // (16x16), z inset by 2 only at the bottom (open at z=20) -- an exact
+    // box-minus-box volume for this perfectly axis-aligned case.
+    const double boxVolume = 20.0 * 20.0 * 20.0;
+    const double cavityVolume = 16.0 * 16.0 * 18.0;
+    REQUIRE(volumeOf(doc.shapeAt(shellIdx)) == Approx(boxVolume - cavityVolume).margin(1.0));
+}
+
+TEST_CASE("Document3D Shell with no faceIndices is invalid, not a sealed hollow solid", "[core3d][shell]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D shell;
+    shell.type = FeatureType::Shell;
+    shell.inputA = boxIdx;
+    shell.p1 = 2.0;
+    // faceIndices left empty -- no face to open the shell through.
+    const int shellIdx = doc.addFeature(shell);
+
+    REQUIRE_FALSE(doc.isValid(shellIdx));
+}
+
 TEST_CASE("Document3D LinearPattern fuses count non-overlapping copies", "[core3d][pattern]") {
     Document3D doc;
     Feature3D box;

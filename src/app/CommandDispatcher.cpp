@@ -2,6 +2,9 @@
 
 #include "CommandLine.h"
 #include "DrawingView.h"
+#ifdef LCAD_HAS_OCCT
+#include "Board3DWindow.h"
+#endif
 #include "commands/AlignCommand.h"
 #include "commands/AnnoScaleCommand.h"
 #include "commands/AttDefCommand.h"
@@ -694,6 +697,15 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<DsnExportCommand>(m_document), QStringLiteral("DSNEXPORT"));
     } else if (cmd == QLatin1String("AUTOROUTE")) {
         startCommand(std::make_unique<AutorouteCommand>(m_document), QStringLiteral("AUTOROUTE"));
+    } else if (cmd == QLatin1String("PCB3D")) {
+#ifdef LCAD_HAS_OCCT
+        auto* window = new Board3DWindow(m_document, lcad::CopperStackup{}, nullptr);
+        window->setAttribute(Qt::WA_DeleteOnClose);
+        window->show();
+#else
+        m_commandLine.appendLine(QStringLiteral("*3D board view requires this build's OpenCASCADE support, "
+                                                "not available here*"));
+#endif
     } else if (cmd == QLatin1String("COPPERPOUR")) {
         startCommand(std::make_unique<CopperPourCommand>(m_document, pickTolerance()), QStringLiteral("COPPERPOUR"));
     } else if (cmd == QLatin1String("GCODE")) {

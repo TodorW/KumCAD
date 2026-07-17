@@ -231,7 +231,9 @@ if(LCAD_ENABLE_3D)
             core3d/Fem.h
             core3d/Fem.cpp
             core3d/Pick3D.h
-            core3d/Pick3D.cpp)
+            core3d/Pick3D.cpp
+            pcb/Board3D.h
+            pcb/Board3D.cpp)
         message(STATUS "3D modeling core enabled (OpenCASCADE ${OpenCASCADE_VERSION})")
     else()
         message(STATUS "OpenCASCADE not found; building without the 3D modeling core")

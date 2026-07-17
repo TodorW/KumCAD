@@ -32,6 +32,11 @@ public:
     double rotation() const { return m_rotation; }
     void setText(std::string text) { m_text = std::move(text); }
 
+    // Real AutoCAD FIELD capability -- see TextEntity's own comment on
+    // the exact same fieldTemplate/text() convention.
+    const std::string& fieldTemplate() const { return m_fieldTemplate; }
+    void setFieldTemplate(std::string tmpl) { m_fieldTemplate = std::move(tmpl); }
+
     // Named text style (STYLE table) resolved at render time.
     const std::string& styleName() const { return m_styleName; }
     void setStyleName(std::string name) { m_styleName = std::move(name); }
@@ -66,6 +71,7 @@ private:
     double m_width;
     double m_rotation;
     std::string m_styleName = "Standard";
+    std::string m_fieldTemplate;
 };
 
 } // namespace lcad

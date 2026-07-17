@@ -422,6 +422,7 @@ void MainWindow::newDocument() {
     m_propertiesPanel->refresh();
     syncSpaceTabs();
     m_currentFilePath.clear();
+    m_dispatcher->setDocumentFileName(QString());
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("New drawing"), 3000);
@@ -464,6 +465,7 @@ bool MainWindow::loadFromPath(const QString& path) {
     // A DWG can only be saved back as DXF, so don't adopt its path as the
     // save target -- Ctrl+S falls through to Save As.
     m_currentFilePath = isDwg ? QString() : path;
+    m_dispatcher->setDocumentFileName(m_currentFilePath);
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Opened %1").arg(QFileInfo(path).fileName()), 3000);
@@ -651,6 +653,7 @@ bool MainWindow::saveDocumentAs() {
         return false;
     }
     m_currentFilePath = path;
+    m_dispatcher->setDocumentFileName(m_currentFilePath);
     m_dirty = false;
     updateWindowTitle();
     statusBar()->showMessage(QStringLiteral("Saved %1").arg(QFileInfo(m_currentFilePath).fileName()), 3000);

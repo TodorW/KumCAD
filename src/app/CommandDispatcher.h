@@ -29,6 +29,10 @@ public:
     // Needed so MOVE/COPY/ROTATE/SCALE/ERASE can act on the current selection.
     void setView(DrawingView* view) { m_view = view; }
 
+    // The document's own path lives on MainWindow (core Document doesn't
+    // track it), so FIELD/UPDATEFIELD's {{FILENAME}} needs it mirrored here.
+    void setDocumentFileName(QString fileName) { m_documentFileName = std::move(fileName); }
+
     // Exposed so a "Customize Aliases..." dialog can edit the live table
     // (edits apply to the next command typed, no restart needed).
     CommandAliases& commandAliases() { return m_aliases; }
@@ -85,6 +89,7 @@ private:
     lcad::Document& m_document;
     CommandLine& m_commandLine;
     DrawingView* m_view = nullptr;
+    QString m_documentFileName;
     std::unique_ptr<DrawCommand> m_activeCommand;
     CommandAliases m_aliases;
 

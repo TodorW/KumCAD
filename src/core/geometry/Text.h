@@ -22,6 +22,14 @@ public:
     const Point2D& position() const { return m_position; }
     const std::string& text() const { return m_text; }
     void setText(std::string text) { m_text = std::move(text); }
+
+    // Real AutoCAD FIELD capability (see core/document/Fields.h): when
+    // non-empty, this is the ORIGINAL {{...}}-placeholder text UPDATEFIELD
+    // re-evaluates -- text() itself always holds the last-resolved
+    // (currently displayed) value, matching how a real field stays live
+    // but only actually updates on specific triggers, not continuously.
+    const std::string& fieldTemplate() const { return m_fieldTemplate; }
+    void setFieldTemplate(std::string tmpl) { m_fieldTemplate = std::move(tmpl); }
     double height() const { return m_height; }
     double rotation() const { return m_rotation; }
 
@@ -50,6 +58,7 @@ private:
     double m_height;
     double m_rotation;
     std::string m_styleName = "Standard";
+    std::string m_fieldTemplate;
 };
 
 } // namespace lcad

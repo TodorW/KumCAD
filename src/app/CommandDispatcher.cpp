@@ -73,12 +73,16 @@
 #include "commands/StyleCommand.h"
 #include "commands/TableCommand.h"
 #include "commands/TableEditCommand.h"
+#include "commands/FieldCommand.h"
 #include "commands/TextCommand.h"
 #include "commands/TrimCommand.h"
 #include "commands/XlineCommand.h"
 #include "commands/XrefCommand.h"
 #include "commands/VpScaleCommand.h"
 #include "core/document/Commands.h"
+#include "core/document/Fields.h"
+#include "core/geometry/MText.h"
+#include "core/geometry/Text.h"
 #include "core/geometry/Arc.h"
 #include "core/geometry/Hatch.h"
 #include "core/geometry/Insert.h"
@@ -290,6 +294,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<RectangCommand>(m_document), QStringLiteral("RECTANG"));
     } else if (cmd == QLatin1String("TEXT") || cmd == QLatin1String("DT")) {
         startCommand(std::make_unique<TextCommand>(m_document), QStringLiteral("TEXT"));
+    } else if (cmd == QLatin1String("FIELD")) {
+        startCommand(std::make_unique<FieldCommand>(m_document, m_documentFileName), QStringLiteral("FIELD"));
     } else if (cmd == QLatin1String("MTEXT") || cmd == QLatin1String("MT") || cmd == QLatin1String("T")) {
         startCommand(std::make_unique<MTextCommand>(m_document), QStringLiteral("MTEXT"));
     } else if (cmd == QLatin1String("MOVE") || cmd == QLatin1String("M")) {
@@ -587,6 +593,24 @@ void CommandDispatcher::handleCommandText(const QString& text) {
     } else if (cmd == QLatin1String("REGEN") || cmd == QLatin1String("RE")) {
         emit documentChanged();
         m_commandLine.appendLine(QStringLiteral("*Regenerated*"));
+    } else if (cmd == QLatin1String("UPDATEFIELD")) {
+        int updated = 0;
+        const std::string fileName = m_documentFileName.toStdString();
+        for (lcad::Entity* e : m_document.entities()) {
+            if (e->type() == lcad::EntityType::Text) {
+                auto* text = static_cast<lcad::TextEntity*>(e);
+                if (text->fieldTemplate().empty()) continue;
+                text->setText(lcad::evaluateFieldTemplate(m_document, text->fieldTemplate(), fileName));
+                ++updated;
+            } else if (e->type() == lcad::EntityType::MText) {
+                auto* mtext = static_cast<lcad::MTextEntity*>(e);
+                if (mtext->fieldTemplate().empty()) continue;
+                mtext->setText(lcad::evaluateFieldTemplate(m_document, mtext->fieldTemplate(), fileName));
+                ++updated;
+            }
+        }
+        m_commandLine.appendLine(QStringLiteral("*Updated %1 field(s)*").arg(updated));
+        emit documentChanged();
     } else if (cmd == QLatin1String("ACTRECORD")) {
         if (m_activeCommand) {
             m_commandLine.appendLine(QStringLiteral("*Finish the active command first*"));

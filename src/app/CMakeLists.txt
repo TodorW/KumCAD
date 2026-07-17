@@ -68,6 +68,8 @@ add_executable(kumcad WIN32
     commands/TextCommand.cpp
     commands/MTextCommand.h
     commands/MTextCommand.cpp
+    commands/FieldCommand.h
+    commands/FieldCommand.cpp
     commands/MviewCommand.h
     commands/MviewCommand.cpp
     commands/VpScaleCommand.h

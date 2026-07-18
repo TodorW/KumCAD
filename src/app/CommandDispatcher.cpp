@@ -214,6 +214,48 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         return;
     }
 
+    if (m_awaitingActSavePath) {
+        m_awaitingActSavePath = false;
+        if (trimmed.isEmpty()) {
+            m_commandLine.appendLine(QStringLiteral("*Cancelled*"));
+        } else if (m_lastMacro.isEmpty()) {
+            m_commandLine.appendLine(QStringLiteral("*No recorded macro yet -- ACTRECORD/ACTSTOP first*"));
+        } else {
+            QFile file(trimmed);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                m_commandLine.appendLine(QStringLiteral("*Cannot write \"%1\"*").arg(trimmed));
+            } else {
+                file.write(m_lastMacro.join(QStringLiteral("\n")).toUtf8());
+                file.write("\n");
+                m_commandLine.appendLine(
+                    QStringLiteral("*Saved %1 step(s) to %2*").arg(m_lastMacro.size()).arg(trimmed));
+            }
+        }
+        return;
+    }
+
+    if (m_awaitingActLoadPath) {
+        m_awaitingActLoadPath = false;
+        if (trimmed.isEmpty()) {
+            m_commandLine.appendLine(QStringLiteral("*Cancelled*"));
+        } else {
+            QFile file(trimmed);
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                m_commandLine.appendLine(QStringLiteral("*Cannot open \"%1\"*").arg(trimmed));
+            } else {
+                QStringList loaded;
+                for (const QByteArray& lineBytes : file.readAll().split('\n')) {
+                    const QString line = QString::fromUtf8(lineBytes);
+                    if (!line.trimmed().isEmpty()) loaded << line;
+                }
+                m_lastMacro = loaded;
+                m_commandLine.appendLine(
+                    QStringLiteral("*Loaded %1 step(s) from %2 -- PLAY to replay*").arg(loaded.size()).arg(trimmed));
+            }
+        }
+        return;
+    }
+
     if (m_activeCommand) {
         if (m_activeCommand->wantsTextInput()) {
             // Free-text stage (e.g. TEXT's "Enter text:"): route everything here,
@@ -668,6 +710,12 @@ void CommandDispatcher::handleCommandText(const QString& text) {
             m_commandLine.appendLine(QStringLiteral("*Playing %1 step(s)*").arg(steps.size()));
             for (const QString& step : steps) handleCommandText(step);
         }
+    } else if (cmd == QLatin1String("ACTSAVE")) {
+        m_awaitingActSavePath = true;
+        m_commandLine.appendLine(QStringLiteral("ACTSAVE  Enter macro file path:"));
+    } else if (cmd == QLatin1String("ACTLOAD")) {
+        m_awaitingActLoadPath = true;
+        m_commandLine.appendLine(QStringLiteral("ACTLOAD  Enter macro file path:"));
     } else if (cmd == QLatin1String("XREF") || cmd == QLatin1String("XR")) {
         startCommand(std::make_unique<XrefCommand>(m_document), QStringLiteral("XREF"));
     } else if (cmd == QLatin1String("EXPLODE") || cmd == QLatin1String("X")) {

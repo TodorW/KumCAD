@@ -112,11 +112,15 @@ private:
     CommandAliases m_aliases;
 
     // ACTRECORD/ACTSTOP/PLAY: a simplified action recorder -- one
-    // last-recorded macro (not AutoCAD's named, saved-to-disk .actm files),
-    // replayed by feeding its lines back through handleCommandText().
+    // last-recorded macro, replayed by feeding its lines back through
+    // handleCommandText(). ACTSAVE/ACTLOAD add real disk persistence (a
+    // plain text file, one typed line per row) closer to AutoCAD's own
+    // named .actm files, without inventing a binary macro format.
     bool m_recording = false;
     QStringList m_recordingBuffer;
     QStringList m_lastMacro;
+    bool m_awaitingActSavePath = false;
+    bool m_awaitingActLoadPath = false;
 
     // Layers LAYISO turned off (they were visible before), for LAYUNISO.
     std::vector<lcad::LayerId> m_layIsoHidden;

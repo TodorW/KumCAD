@@ -258,6 +258,108 @@ std::optional<QString> ViaStitchCommand::onText(const QString& text) {
     return QStringLiteral("*Via stitching: %1 via(s) placed*").arg(ids.size());
 }
 
+std::optional<QString> PanelizeCommand::onPoint(const lcad::Point2D& pt) {
+    if (m_stage != Stage::Pick) return std::nullopt;
+
+    const lcad::PolylineEntity* best = nullptr;
+    double bestDist = m_pickTolerance;
+    for (const lcad::Entity* e : m_document.entities()) {
+        if (e->type() != lcad::EntityType::Polyline) continue;
+        const auto* pl = static_cast<const lcad::PolylineEntity*>(e);
+        if (!pl->closed()) continue;
+        const double d = pl->distanceTo(pt);
+        if (d <= bestDist) {
+            bestDist = d;
+            best = pl;
+        }
+    }
+    if (!best) return QStringLiteral("*No closed polyline there*\nSelect a closed polyline board boundary:");
+
+    m_boundary = best->flattenedVertices();
+    m_stage = Stage::Columns;
+    return QStringLiteral("Columns <2>:");
+}
+
+std::optional<QString> PanelizeCommand::onText(const QString& text) {
+    switch (m_stage) {
+    case Stage::Columns: {
+        if (!text.trimmed().isEmpty()) {
+            bool ok = false;
+            const int value = text.trimmed().toInt(&ok);
+            if (!ok || value < 1) return QStringLiteral("*Invalid column count*");
+            m_params.columns = value;
+        }
+        m_stage = Stage::Rows;
+        return QStringLiteral("Rows <1>:");
+    }
+    case Stage::Rows: {
+        if (!text.trimmed().isEmpty()) {
+            bool ok = false;
+            const int value = text.trimmed().toInt(&ok);
+            if (!ok || value < 1) return QStringLiteral("*Invalid row count*");
+            m_params.rows = value;
+        }
+        m_stage = Stage::Gap;
+        return QStringLiteral("Gap between boards <2.0>:");
+    }
+    case Stage::Gap: {
+        if (!text.trimmed().isEmpty()) {
+            bool ok = false;
+            const double value = text.trimmed().toDouble(&ok);
+            if (!ok || value < 0.0) return QStringLiteral("*Invalid gap*");
+            m_params.gap = value;
+        }
+        m_stage = Stage::Separator;
+        return QStringLiteral("Separator [Vscore/Mousebites/None] <Vscore>:");
+    }
+    case Stage::Separator: {
+        const QString option = text.trimmed().toUpper();
+        if (option.isEmpty() || option == QLatin1String("VSCORE") || option == QLatin1String("V")) {
+            m_params.separator = lcad::PanelSeparator::VScore;
+        } else if (option == QLatin1String("MOUSEBITES") || option == QLatin1String("M")) {
+            m_params.separator = lcad::PanelSeparator::MouseBites;
+        } else if (option == QLatin1String("NONE") || option == QLatin1String("N")) {
+            m_params.separator = lcad::PanelSeparator::None;
+        } else {
+            return QStringLiteral("*Invalid option, expected Vscore/Mousebites/None*");
+        }
+        if (m_params.separator != lcad::PanelSeparator::MouseBites) {
+            m_finished = true;
+        } else {
+            m_stage = Stage::MouseBiteDiameter;
+            return QStringLiteral("Mouse-bite hole diameter <0.5>:");
+        }
+        break;
+    }
+    case Stage::MouseBiteDiameter: {
+        if (!text.trimmed().isEmpty()) {
+            bool ok = false;
+            const double value = text.trimmed().toDouble(&ok);
+            if (!ok || value <= 0.0) return QStringLiteral("*Invalid hole diameter*");
+            m_params.mouseBiteHoleDiameter = value;
+        }
+        m_stage = Stage::MouseBiteSpacing;
+        return QStringLiteral("Mouse-bite hole spacing <1.0>:");
+    }
+    case Stage::MouseBiteSpacing: {
+        if (!text.trimmed().isEmpty()) {
+            bool ok = false;
+            const double value = text.trimmed().toDouble(&ok);
+            if (!ok || value <= 0.0) return QStringLiteral("*Invalid hole spacing*");
+            m_params.mouseBiteSpacing = value;
+        }
+        m_finished = true;
+        break;
+    }
+    default:
+        return std::nullopt;
+    }
+
+    const auto ids = lcad::panelizeBoard(m_document, m_boundary, m_params);
+    if (ids.empty()) return QStringLiteral("*Panelization produced nothing -- check boundary*");
+    return QStringLiteral("*Panelized: %1 x %2 (%3 entities added)*").arg(m_params.columns).arg(m_params.rows).arg(ids.size());
+}
+
 std::optional<QString> AutorouteCommand::onText(const QString& text) {
     switch (m_stage) {
     case Stage::NetlistPath: {

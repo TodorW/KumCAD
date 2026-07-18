@@ -4,6 +4,7 @@
 #include "core/document/Document.h"
 #include "core/pcb/Autorouter.h"
 #include "core/pcb/CopperPour.h"
+#include "core/pcb/Panelization.h"
 #include "core/pcb/Ratsnest.h"
 #include "core/pcb/ViaStitching.h"
 
@@ -159,6 +160,33 @@ private:
     double m_inset = 1.0;
     double m_diameter = 0.6;
     double m_drillDiameter = 0.3;
+    bool m_finished = false;
+};
+
+// PANELIZE: select a closed polyline boundary (the single board's own
+// outline, same picking convention COPPERPOUR/VIASTITCH use above), then
+// columns, rows, gap, and separator style -- gangs the board up into an
+// NxM panel with V-score or mouse-bite separators (see
+// core/pcb/Panelization.h).
+class PanelizeCommand : public DrawCommand {
+public:
+    PanelizeCommand(lcad::Document& document, double pickTolerance)
+        : m_document(document), m_pickTolerance(pickTolerance) {}
+
+    QString start() override { return QStringLiteral("PANELIZE  Select a closed polyline board boundary:"); }
+    std::optional<QString> onPoint(const lcad::Point2D& pt) override;
+    bool wantsTextInput() const override { return m_stage != Stage::Pick; }
+    std::optional<QString> onText(const QString& text) override;
+    bool isFinished() const override { return m_finished; }
+    void cancel() override { m_finished = true; }
+
+private:
+    enum class Stage { Pick, Columns, Rows, Gap, Separator, MouseBiteDiameter, MouseBiteSpacing };
+    lcad::Document& m_document;
+    double m_pickTolerance;
+    Stage m_stage = Stage::Pick;
+    std::vector<lcad::Point2D> m_boundary;
+    lcad::PanelizeParams m_params;
     bool m_finished = false;
 };
 

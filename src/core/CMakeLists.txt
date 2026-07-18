@@ -95,6 +95,8 @@ add_library(lcad_core STATIC
     pcb/Teardrop.cpp
     pcb/ViaStitching.h
     pcb/ViaStitching.cpp
+    pcb/Panelization.h
+    pcb/Panelization.cpp
     electrical/ElectricalLibrary.h
     electrical/ElectricalLibrary.cpp
     electrical/WireNumbering.h

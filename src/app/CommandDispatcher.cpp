@@ -798,6 +798,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         startCommand(std::make_unique<CopperPourCommand>(m_document, pickTolerance()), QStringLiteral("COPPERPOUR"));
     } else if (cmd == QLatin1String("VIASTITCH")) {
         startCommand(std::make_unique<ViaStitchCommand>(m_document, pickTolerance()), QStringLiteral("VIASTITCH"));
+    } else if (cmd == QLatin1String("PANELIZE")) {
+        startCommand(std::make_unique<PanelizeCommand>(m_document, pickTolerance()), QStringLiteral("PANELIZE"));
     } else if (cmd == QLatin1String("LIBSAVE")) {
         startCommand(std::make_unique<LibSaveCommand>(m_document), QStringLiteral("LIBSAVE"));
     } else if (cmd == QLatin1String("LIBLOAD")) {

@@ -5,6 +5,7 @@
 #include "core/geometry/Via.h"
 #include "core/pcb/Drc.h"
 #include "core/pcb/GerberWriter.h"
+#include "core/pcb/Panelization.h"
 #include "core/pcb/Ratsnest.h"
 #include "core/pcb/ViaStitching.h"
 #include "core/schematic/SymbolLibrary.h"
@@ -387,6 +388,113 @@ TEST_CASE("stitchVias returns no vias for a degenerate boundary or non-positive 
 
     const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(20, 0), Point2D(20, 20), Point2D(0, 20)};
     REQUIRE(stitchVias(doc, doc.currentLayer(), boundary, 0.0, 1.0).empty());
+}
+
+TEST_CASE("panelizeBoard clones the board's own entities across a columns x rows grid with a V-score line",
+         "[pcb][panelize]") {
+    Document doc;
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(0, 0), Point2D(20, 0)}, 0.25));
+    const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(20, 0), Point2D(20, 10), Point2D(0, 10)};
+    const std::size_t originalCount = doc.entities().size();
+
+    PanelizeParams params;
+    params.columns = 2;
+    params.rows = 1;
+    params.gap = 2.0;
+    params.separator = PanelSeparator::VScore;
+
+    const std::vector<EntityId> ids = panelizeBoard(doc, boundary, params);
+    REQUIRE_FALSE(ids.empty());
+    // One cloned copy of the original track plus one V-score separator line.
+    REQUIRE(doc.entities().size() == originalCount * 2 + 1);
+
+    const std::vector<Entity*> after = doc.entities();
+    const bool hasScoreLine =
+        std::any_of(after.begin(), after.end(), [](const Entity* e) { return e->type() == EntityType::Line; });
+    REQUIRE(hasScoreLine);
+
+    const bool onDwgsUser = std::any_of(doc.layers().begin(), doc.layers().end(),
+                                       [](const Layer& l) { return l.name == "Dwgs.User"; });
+    REQUIRE(onDwgsUser);
+}
+
+TEST_CASE("panelizeBoard places a row of mouse-bite hole circles instead of a single V-score line",
+         "[pcb][panelize]") {
+    Document doc;
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(0, 0), Point2D(20, 0)}, 0.25));
+    const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(20, 0), Point2D(20, 10), Point2D(0, 10)};
+
+    PanelizeParams params;
+    params.columns = 2;
+    params.rows = 1;
+    params.gap = 2.0;
+    params.separator = PanelSeparator::MouseBites;
+    params.mouseBiteSpacing = 2.0;
+
+    panelizeBoard(doc, boundary, params);
+    const std::vector<Entity*> after = doc.entities();
+    const int circleCount = static_cast<int>(
+        std::count_if(after.begin(), after.end(), [](const Entity* e) { return e->type() == EntityType::Circle; }));
+    REQUIRE(circleCount >= 2);
+    REQUIRE(std::none_of(after.begin(), after.end(), [](const Entity* e) { return e->type() == EntityType::Line; }));
+}
+
+TEST_CASE("panelizeBoard adds no separator geometry when separator is None", "[pcb][panelize]") {
+    Document doc;
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(0, 0), Point2D(20, 0)}, 0.25));
+    const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(20, 0), Point2D(20, 10), Point2D(0, 10)};
+    const std::size_t originalCount = doc.entities().size();
+
+    PanelizeParams params;
+    params.columns = 2;
+    params.rows = 2;
+    params.separator = PanelSeparator::None;
+
+    const std::vector<EntityId> ids = panelizeBoard(doc, boundary, params);
+    REQUIRE(ids.size() == originalCount * 3); // 2x2 grid = 3 additional copies, no separator entities
+    REQUIRE(doc.entities().size() == originalCount * 4);
+}
+
+TEST_CASE("panelizeBoard preserves a footprint's REFDES attribute on every cloned copy", "[pcb][panelize]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(5, 5));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(20, 0), Point2D(20, 10), Point2D(0, 10)};
+    PanelizeParams params;
+    params.columns = 2;
+    params.rows = 1;
+    params.separator = PanelSeparator::None;
+
+    panelizeBoard(doc, boundary, params);
+    int refdesCount = 0;
+    for (const Entity* e : doc.entities()) {
+        if (e->type() != EntityType::Insert) continue;
+        const auto* ins = static_cast<const InsertEntity*>(e);
+        const std::string* refdes = ins->attributeValue("REFDES");
+        if (refdes && *refdes == "R1") ++refdesCount;
+    }
+    REQUIRE(refdesCount == 2); // original plus its clone, both keeping "R1"
+}
+
+TEST_CASE("panelizeBoard returns nothing for a degenerate boundary or non-positive grid size",
+         "[pcb][panelize]") {
+    Document doc;
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                std::vector<Point2D>{Point2D(0, 0), Point2D(20, 0)}, 0.25));
+    PanelizeParams params;
+
+    REQUIRE(panelizeBoard(doc, {Point2D(0, 0), Point2D(1, 1)}, params).empty());
+
+    PanelizeParams badGrid;
+    badGrid.columns = 0;
+    REQUIRE(panelizeBoard(doc, {Point2D(0, 0), Point2D(20, 0), Point2D(20, 10), Point2D(0, 10)}, badGrid).empty());
 }
 
 TEST_CASE("writePickAndPlace lists each footprint's reference designator and position", "[pcb][pnp]") {

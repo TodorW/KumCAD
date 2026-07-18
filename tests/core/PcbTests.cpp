@@ -454,6 +454,32 @@ TEST_CASE("stitchVias returns no vias for a degenerate boundary or non-positive 
     REQUIRE(stitchVias(doc, doc.currentLayer(), boundary, 0.0, 1.0).empty());
 }
 
+TEST_CASE("stitchVias insets by a real, uniform perpendicular distance on a non-square boundary "
+         "(a true parallel offset, not the old per-vertex centroid move)",
+         "[pcb][via-stitching]") {
+    // A 40x10 rectangle: the old centroid-move approach moved each
+    // corner DIAGONALLY toward the centroid, so a corner-adjacent via's
+    // perpendicular distance from the nearest original edge came out far
+    // short of the requested inset on an elongated (non-square)
+    // rectangle (the diagonal move splits unevenly between the near and
+    // far edge). A true parallel offset keeps every edge (including the
+    // corners, which stay sharp for a 90-degree miter) at exactly the
+    // requested distance.
+    Document doc;
+    const std::vector<Point2D> boundary = {Point2D(0, 0), Point2D(40, 0), Point2D(40, 10), Point2D(0, 10)};
+    const double inset = 1.0;
+
+    const std::vector<EntityId> ids = stitchVias(doc, doc.currentLayer(), boundary, 3.0, inset);
+    REQUIRE(ids.size() >= 10);
+
+    for (const EntityId id : ids) {
+        const auto* via = static_cast<const ViaEntity*>(doc.findEntity(id));
+        const double distToNearestEdge =
+            std::min({via->position().x, 40.0 - via->position().x, via->position().y, 10.0 - via->position().y});
+        REQUIRE(distToNearestEdge == Catch::Approx(inset).margin(1e-6));
+    }
+}
+
 TEST_CASE("panelizeBoard clones the board's own entities across a columns x rows grid with a V-score line",
          "[pcb][panelize]") {
     Document doc;

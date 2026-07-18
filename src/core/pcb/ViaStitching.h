@@ -16,14 +16,17 @@ class Document;
 //
 // Each via is inset from the boundary edge (toward the polygon's own
 // centroid) by inset, so its copper ring lands inside the pour instead of
-// hanging half off the edge. Real, disclosed simplification: the inset is
-// a per-vertex move toward the centroid, not a true parallel polygon
-// offset (the same "no general 2D polygon-boolean/clipping library" call
-// CopperPour.h's own header already discloses) -- fine for the convex,
-// largely-rectangular board-edge/keepout boundaries this is meant for,
-// but a deeply concave boundary can place a via outside the actual pour.
-// Doesn't itself check DRC clearance against other-net copper -- run
-// runDrc() (Drc.h) afterward.
+// hanging half off the edge -- a real parallel (miter-normal) polygon
+// offset (PolylineOps.h's own offsetPolyline(), the same algorithm
+// OFFSET itself uses), not just a per-vertex move toward the centroid.
+// Real, disclosed simplification: if offsetPolyline itself degenerates
+// (e.g. inset larger than a local corner radius allows), this falls back
+// to the older per-vertex centroid move instead of failing outright --
+// fine for the convex, largely-rectangular board-edge/keepout boundaries
+// this is meant for, but a deeply concave boundary hitting that fallback
+// can still place a via outside the actual pour. Doesn't itself check
+// DRC clearance against other-net copper -- run runDrc() (Drc.h)
+// afterward.
 //
 // Returns the ids of every ViaEntity placed (on layer). Returns an empty
 // vector if boundary has fewer than 3 points, spacing <= 0, or the

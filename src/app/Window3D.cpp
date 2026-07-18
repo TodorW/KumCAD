@@ -38,6 +38,7 @@
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -49,6 +50,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTextStream>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QStatusBar>
@@ -312,6 +314,16 @@ private:
 // itself already documents. Not Python (FreeCAD's own scripting
 // language) -- a real, disclosed scope choice matching how the 2D side's
 // own scripting story already works.
+//
+// Macro recorder (mirrors the 2D side's ACTRECORD/ACTSTOP/PLAY, see
+// CommandDispatcher.cpp): every line typed while recording is captured
+// verbatim into m_recordedLines. Unlike 2D's recorder -- which invents
+// its own encoded step format for raw command-line text and clicked
+// points -- there's nothing to invent here: a recorded line already IS
+// real AutoLISP source, so "replay" is just re-running the same text
+// through m_interp, and "save"/"load" is just writing/reading it as a
+// plain .lsp file, a real bonus 2D's own in-session-only recorder
+// doesn't have.
 class Lisp3DConsoleDialog : public QDialog {
 public:
     explicit Lisp3DConsoleDialog(Document3D& document, QWidget* parent = nullptr)
@@ -328,13 +340,35 @@ public:
         m_input = new QLineEdit(this);
         connect(m_input, &QLineEdit::returnPressed, this, &Lisp3DConsoleDialog::runLine);
 
+        m_recordButton = new QPushButton(QStringLiteral("Record"), this);
+        m_recordButton->setCheckable(true);
+        connect(m_recordButton, &QPushButton::toggled, this, &Lisp3DConsoleDialog::toggleRecording);
+
+        m_playButton = new QPushButton(QStringLiteral("Play"), this);
+        m_playButton->setEnabled(false);
+        connect(m_playButton, &QPushButton::clicked, this, &Lisp3DConsoleDialog::playMacro);
+
+        auto* saveButton = new QPushButton(QStringLiteral("Save Macro..."), this);
+        connect(saveButton, &QPushButton::clicked, this, &Lisp3DConsoleDialog::saveMacro);
+
+        auto* loadButton = new QPushButton(QStringLiteral("Load Macro..."), this);
+        connect(loadButton, &QPushButton::clicked, this, &Lisp3DConsoleDialog::loadAndPlayMacro);
+
         auto* closeButton = new QPushButton(QStringLiteral("Close"), this);
         connect(closeButton, &QPushButton::clicked, this, &QDialog::accept);
+
+        auto* buttonRow = new QHBoxLayout();
+        buttonRow->addWidget(m_recordButton);
+        buttonRow->addWidget(m_playButton);
+        buttonRow->addWidget(saveButton);
+        buttonRow->addWidget(loadButton);
+        buttonRow->addStretch(1);
+        buttonRow->addWidget(closeButton);
 
         auto* layout = new QVBoxLayout(this);
         layout->addWidget(m_output, 1);
         layout->addWidget(m_input);
-        layout->addWidget(closeButton);
+        layout->addLayout(buttonRow);
     }
 
 private:
@@ -342,7 +376,14 @@ private:
         const QString text = m_input->text();
         if (text.trimmed().isEmpty()) return;
         m_input->clear();
+        runText(text);
+    }
+
+    // Shared by interactive typing and macro playback so a played line
+    // gets exactly the same echo/output/error treatment a typed one does.
+    void runText(const QString& text) {
         m_output->appendPlainText(QStringLiteral("> ") + text);
+        if (m_recording) m_recordedLines << text;
 
         const auto result = m_interp.run(text.toStdString());
         if (!result.output.empty()) m_output->appendPlainText(QString::fromStdString(result.output));
@@ -353,10 +394,72 @@ private:
         }
     }
 
+    void toggleRecording(bool checked) {
+        m_recording = checked;
+        if (checked) {
+            m_recordedLines.clear();
+            m_recordButton->setText(QStringLiteral("Stop Recording"));
+            m_output->appendPlainText(QStringLiteral("; Recording started"));
+        } else {
+            m_recordButton->setText(QStringLiteral("Record"));
+            m_output->appendPlainText(
+                QStringLiteral("; Recording stopped: %1 step(s)").arg(m_recordedLines.size()));
+            m_playButton->setEnabled(!m_recordedLines.isEmpty());
+        }
+    }
+
+    void playMacro() {
+        if (m_recordedLines.isEmpty()) return;
+        const QStringList steps = m_recordedLines;
+        m_output->appendPlainText(QStringLiteral("; Playing %1 step(s)").arg(steps.size()));
+        for (const QString& step : steps) runText(step);
+    }
+
+    void saveMacro() {
+        if (m_recordedLines.isEmpty()) {
+            m_output->appendPlainText(QStringLiteral("; Nothing recorded yet"));
+            return;
+        }
+        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save Macro"), QString(),
+                                                           QStringLiteral("AutoLISP (*.lsp)"));
+        if (path.isEmpty()) return;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            m_output->appendPlainText(QStringLiteral("; Could not write %1").arg(path));
+            return;
+        }
+        QTextStream out(&file);
+        for (const QString& line : m_recordedLines) out << line << '\n';
+        m_output->appendPlainText(QStringLiteral("; Saved %1 step(s) to %2").arg(m_recordedLines.size()).arg(path));
+    }
+
+    void loadAndPlayMacro() {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Load Macro"), QString(),
+                                                           QStringLiteral("AutoLISP (*.lsp)"));
+        if (path.isEmpty()) return;
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            m_output->appendPlainText(QStringLiteral("; Could not open %1").arg(path));
+            return;
+        }
+        QTextStream in(&file);
+        QStringList steps;
+        while (!in.atEnd()) {
+            const QString line = in.readLine();
+            if (!line.trimmed().isEmpty()) steps << line;
+        }
+        m_output->appendPlainText(QStringLiteral("; Loaded %1 step(s) from %2").arg(steps.size()).arg(path));
+        for (const QString& step : steps) runText(step);
+    }
+
     Document3D& m_document;
     lcad::LispInterpreter m_interp;
     QPlainTextEdit* m_output = nullptr;
     QLineEdit* m_input = nullptr;
+    QPushButton* m_recordButton = nullptr;
+    QPushButton* m_playButton = nullptr;
+    bool m_recording = false;
+    QStringList m_recordedLines;
 };
 
 // Flat lengths/bend angles are entered as comma-separated numbers rather

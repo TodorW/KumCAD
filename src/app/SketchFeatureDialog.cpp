@@ -172,8 +172,8 @@ void SketchFeatureDialog::updateHint() {
                                             "vs. smooth/BSpline-blended (unchecked, the default) between profiles."));
         break;
     case FeatureType::Sweep:
-        m_hintLabel->setText(QStringLiteral("Sweep: sweeps Sketch (the profile) along Path Sketch's own single "
-                                            "straight line (multi-segment/curved paths aren't supported)."));
+        m_hintLabel->setText(QStringLiteral("Sweep: sweeps Sketch (the profile) along Path Sketch's own path -- "
+                                            "any chained mix of straight lines and arcs, not just one line."));
         break;
     case FeatureType::Draft:
         m_hintLabel->setText(QStringLiteral("Draft: adds a Radius-field-as-degrees taper to Target's listed Face "

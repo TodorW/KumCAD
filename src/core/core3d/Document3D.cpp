@@ -17,6 +17,7 @@
 #include <BRepLib.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepTools.hxx>
@@ -29,7 +30,9 @@
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepPrimAPI_MakeWedge.hxx>
 #include <GCE2d_MakeSegment.hxx>
+#include <Geom_Circle.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -47,6 +50,7 @@
 #include <gp_Vec.hxx>
 
 #include <cmath>
+#include <map>
 #include <unordered_map>
 
 namespace lcad {
@@ -89,6 +93,135 @@ std::vector<int> reresolveIndices(const TopoDS_Shape& target, const std::vector<
     resolved.reserve(rawIndices.size());
     for (const FaceFingerprint& fp : fingerprints) resolved.push_back(resolveFaceIndex(target, fp));
     return resolved;
+}
+
+// One traversal step of a Sweep path: a straight edge (arcIndex < 0) or an
+// arc (arcIndex into pathSketch.arcs()) from p1 to p2, mirroring
+// SketchToFace.cpp's own ChainEdge/findClosedLoops -- p1/p2 may be
+// swapped relative to the underlying SketchLine/SketchArc's own stored
+// endpoints, tracked via `reversed` so arc sweep direction comes out
+// right when the edge is actually built.
+struct SweepPathEdge {
+    int p1 = -1;
+    int p2 = -1;
+    int arcIndex = -1;
+    bool reversed = false;
+};
+
+// Greedily chains ALL of pathSketch's non-construction lines/arcs into a
+// single ordered path, mirroring SketchToFace.cpp's findClosedLoops but
+// for an OPEN path -- a sweep spine doesn't need to close the way a
+// profile boundary does. Starts from whichever point has only one
+// incident edge (an open path's own end); if every point has degree 2
+// (the path is itself a closed loop), starts from the first edge's own
+// p1 instead. Real, disclosed simplification matching findClosedLoops'
+// own: assumes a single simple path (every point degree <= 2), not a
+// branching network -- a stray extra edge sharing an endpoint is simply
+// never picked up, the same silent-drop behavior findClosedLoops has for
+// an unclosed chain.
+std::vector<SweepPathEdge> chainSweepPath(const Sketch& pathSketch) {
+    std::vector<SweepPathEdge> edges;
+    for (std::size_t i = 0; i < pathSketch.lines().size(); ++i) {
+        if (pathSketch.lines()[i].construction) continue;
+        edges.push_back({pathSketch.lines()[i].p1, pathSketch.lines()[i].p2, -1, false});
+    }
+    for (std::size_t i = 0; i < pathSketch.arcs().size(); ++i) {
+        if (pathSketch.arcs()[i].construction) continue;
+        edges.push_back({pathSketch.arcs()[i].start, pathSketch.arcs()[i].end, static_cast<int>(i), false});
+    }
+    if (edges.empty()) return {};
+
+    std::map<int, int> degree;
+    for (const SweepPathEdge& e : edges) {
+        ++degree[e.p1];
+        ++degree[e.p2];
+    }
+    int startPoint = edges.front().p1;
+    for (const auto& [point, count] : degree) {
+        if (count == 1) {
+            startPoint = point;
+            break;
+        }
+    }
+
+    std::vector<bool> used(edges.size(), false);
+    std::vector<SweepPathEdge> chain;
+    int tail = startPoint;
+    bool extended = true;
+    while (extended) {
+        extended = false;
+        for (std::size_t i = 0; i < edges.size(); ++i) {
+            if (used[i]) continue;
+            SweepPathEdge e = edges[i];
+            if (e.p1 == tail && e.p2 != tail) {
+                chain.push_back(e);
+                tail = e.p2;
+                used[i] = true;
+                extended = true;
+            } else if (e.p2 == tail && e.p1 != tail) {
+                std::swap(e.p1, e.p2);
+                e.reversed = true;
+                chain.push_back(e);
+                tail = e.p2;
+                used[i] = true;
+                extended = true;
+            }
+        }
+    }
+    return chain;
+}
+
+// Builds a real circular-arc edge for one chained SweepPathEdge, at local
+// Z=0 -- the same "path sketch used directly in local XY, no placement
+// transform" convention the rest of the Sweep case already relies on.
+// Mirrors SketchToFace.cpp's own makeArcEdge (same angle-sweep-direction
+// math), duplicated locally rather than shared since that one is scoped
+// to a placement-aware profile face builder this Z=0-only path doesn't
+// need.
+TopoDS_Edge makeSweepPathArcEdge(const Sketch& pathSketch, const SketchArc& arc, const SweepPathEdge& edge) {
+    const Point2D& center = pathSketch.points()[static_cast<std::size_t>(arc.center)];
+    const Point2D& p1 = pathSketch.points()[static_cast<std::size_t>(edge.p1)];
+    const Point2D& p2 = pathSketch.points()[static_cast<std::size_t>(edge.p2)];
+
+    const bool effectiveCcw = edge.reversed ? !arc.ccw : arc.ccw;
+    double startAngle = std::atan2(p1.y - center.y, p1.x - center.x);
+    double endAngle = std::atan2(p2.y - center.y, p2.x - center.x);
+    if (effectiveCcw) {
+        while (endAngle < startAngle) endAngle += 2.0 * M_PI;
+    } else {
+        while (endAngle > startAngle) endAngle -= 2.0 * M_PI;
+    }
+    const double u1 = std::min(startAngle, endAngle);
+    const double u2 = std::max(startAngle, endAngle);
+
+    // XDirection pinned explicitly to world +X (the 2-arg gp_Ax2(P, N)
+    // constructor picks an arbitrary, implementation-defined X direction
+    // instead -- it would NOT generally match the plain atan2 angles
+    // computed above in local XY, silently sweeping the wrong arc of the
+    // circle). Same fix SketchToFace.cpp's own makeArcEdge needed.
+    const gp_Ax2 axis(gp_Pnt(center.x, center.y, 0.0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0));
+    Handle(Geom_Circle) circle = new Geom_Circle(axis, arc.radius);
+    Handle(Geom_TrimmedCurve) trimmed = new Geom_TrimmedCurve(circle, u1, u2);
+    return BRepBuilderAPI_MakeEdge(trimmed).Edge();
+}
+
+// The path's own tangent direction at its very first point -- for a
+// line, its own direction; for an arc, perpendicular to the radius
+// vector, signed by the arc's own (possibly reversed) sweep direction.
+// Used to orient the swept profile perpendicular to the spine at its
+// start, the same way a straight-line-only Sweep already did.
+Point2D sweepPathStartTangent(const Sketch& pathSketch, const std::vector<SweepPathEdge>& chain) {
+    const SweepPathEdge& first = chain.front();
+    const Point2D& p1 = pathSketch.points()[static_cast<std::size_t>(first.p1)];
+    if (first.arcIndex < 0) {
+        const Point2D& p2 = pathSketch.points()[static_cast<std::size_t>(first.p2)];
+        return p2 - p1;
+    }
+    const SketchArc& arc = pathSketch.arcs()[static_cast<std::size_t>(first.arcIndex)];
+    const Point2D& center = pathSketch.points()[static_cast<std::size_t>(arc.center)];
+    const bool effectiveCcw = first.reversed ? !arc.ccw : arc.ccw;
+    const Point2D radial = p1 - center;
+    return effectiveCcw ? Point2D(-radial.y, radial.x) : Point2D(radial.y, -radial.x);
 }
 
 } // namespace
@@ -493,17 +626,21 @@ void Document3D::recomputeOne(int index) {
         }
         const auto profileFace = sketchToFace(m_sketches[static_cast<std::size_t>(f.sketchIndex)]);
         const Sketch& pathSketch = m_sketches[static_cast<std::size_t>(f.pathSketchIndex)];
-        // Exactly one straight line -- see FeatureType::Sweep's own
-        // comment on why a multi-segment/curved path isn't supported.
-        if (!profileFace || pathSketch.lines().size() != 1) {
+        if (!profileFace) {
+            ok = false;
+            break;
+        }
+        // A general chained path (any mix of straight and curved
+        // segments, not just one line) -- see FeatureType::Sweep's own
+        // comment.
+        const std::vector<SweepPathEdge> pathChain = chainSweepPath(pathSketch);
+        if (pathChain.empty()) {
             ok = false;
             break;
         }
 
-        const SketchLine& firstLine = pathSketch.lines()[0];
-        const Point2D& pStart = pathSketch.points()[static_cast<std::size_t>(firstLine.p1)];
-        const Point2D& pEnd = pathSketch.points()[static_cast<std::size_t>(firstLine.p2)];
-        const Point2D dir2D = pEnd - pStart;
+        const Point2D& pStart = pathSketch.points()[static_cast<std::size_t>(pathChain.front().p1)];
+        const Point2D dir2D = sweepPathStartTangent(pathSketch, pathChain);
         const double dirLen = dir2D.length();
         if (dirLen < 1e-9) {
             ok = false;
@@ -514,9 +651,9 @@ void Document3D::recomputeOne(int index) {
         // +Z), same as every other sketch-consuming feature -- but a
         // pipe sweep needs the profile perpendicular to the spine's own
         // initial direction (its plane's normal parallel to that
-        // direction, not the +Z axis), or MakePipe just extrudes it
+        // direction, not the +Z axis), or the sweep just extrudes it
         // edge-on instead of sweeping a real cross-section. Rotating the
-        // profile's own +Z axis onto the spine's start direction (a
+        // profile's own +Z axis onto the spine's start tangent (a
         // general vector-to-vector rotation: axis = their cross
         // product, angle = the angle between them) fixes that, then
         // translating it to the spine's own start point positions it
@@ -533,20 +670,42 @@ void Document3D::recomputeOne(int index) {
         profileShape = BRepBuilderAPI_Transform(profileShape, translate.Multiplied(rotate), true).Shape();
 
         BRepBuilderAPI_MakeWire wireBuilder;
-        for (const SketchLine& line : pathSketch.lines()) {
-            const Point2D& a = pathSketch.points()[static_cast<std::size_t>(line.p1)];
-            const Point2D& b = pathSketch.points()[static_cast<std::size_t>(line.p2)];
-            wireBuilder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a.x, a.y, 0.0), gp_Pnt(b.x, b.y, 0.0)));
+        for (const SweepPathEdge& edge : pathChain) {
+            if (edge.arcIndex < 0) {
+                const Point2D& a = pathSketch.points()[static_cast<std::size_t>(edge.p1)];
+                const Point2D& b = pathSketch.points()[static_cast<std::size_t>(edge.p2)];
+                wireBuilder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(a.x, a.y, 0.0), gp_Pnt(b.x, b.y, 0.0)));
+            } else {
+                wireBuilder.Add(makeSweepPathArcEdge(pathSketch, pathSketch.arcs()[static_cast<std::size_t>(edge.arcIndex)], edge));
+            }
         }
         if (!wireBuilder.IsDone()) {
             ok = false;
             break;
         }
 
-        BRepOffsetAPI_MakePipe pipeBuilder(wireBuilder.Wire(), profileShape);
+        // MakePipeShell (not MakePipe -- MakePipe requires a G1-continuous
+        // spine, which a sharp-cornered multi-segment path isn't) with an
+        // explicit RightCorner transition mode: two adjacent segments'
+        // own pipe pieces are extended and intersected at each fracture
+        // of the spine, OCCT's own designed answer to exactly this case.
+        // The profile is already positioned/oriented above (WithContact/
+        // WithCorrection left at their default false -- letting OCCT
+        // reposition it would fight that placement). Unlike MakePipe
+        // (which accepts a Face profile directly and infers the solid
+        // itself), MakePipeShell is fundamentally a WIRE sweeper -- it
+        // needs the profile's own outer wire, then MakeSolid() below caps
+        // the two open ends into a real solid.
+        const TopoDS_Wire profileWire = BRepTools::OuterWire(TopoDS::Face(profileShape));
+        BRepOffsetAPI_MakePipeShell pipeBuilder(wireBuilder.Wire());
+        pipeBuilder.SetTransitionMode(BRepBuilderAPI_RightCorner);
+        pipeBuilder.Add(profileWire);
         pipeBuilder.Build();
         ok = pipeBuilder.IsDone();
-        if (ok) shape = pipeBuilder.Shape();
+        if (ok) {
+            pipeBuilder.MakeSolid();
+            shape = pipeBuilder.Shape();
+        }
         break;
     }
     case FeatureType::Draft: {

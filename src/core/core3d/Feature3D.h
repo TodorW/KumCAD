@@ -70,15 +70,17 @@ enum class FeatureType {
                    // consecutive profiles' outer wires -- both are
                    // legitimate, commonly-wanted real-FreeCAD Loft modes.
     Sweep,         // sweeps sketchIndex's face profile along
-                   // pathSketchIndex's own path via BRepOffsetAPI_MakePipe.
-                   // Real, disclosed scope cut: the path must be exactly
-                   // one straight SketchLine, not a multi-segment or
-                   // curved wire -- MakePipe itself requires a G1-
-                   // continuous spine (its own documented limitation),
-                   // and a sharp-cornered polyline isn't one; a real
-                   // multi-segment/curved sweep would need
-                   // BRepOffsetAPI_MakePipeShell's own explicit corner-
-                   // transition modes instead, which this doesn't attempt
+                   // pathSketchIndex's own path -- any mix of straight
+                   // lines and arcs, chained in order (see
+                   // Document3D.cpp's own chainSweepPath), not just one
+                   // straight SketchLine. Built via
+                   // BRepOffsetAPI_MakePipeShell with an explicit
+                   // RightCorner transition mode (real corners, not
+                   // MakePipe's own G1-continuous-spine requirement,
+                   // which a sharp-cornered path never satisfies). Real,
+                   // disclosed simplification matching SketchToFace.cpp's
+                   // findClosedLoops: assumes a single simple path (every
+                   // point degree <= 2), not a branching network
     Draft,         // adds a p1-degree draft angle to inputA's faceIndices
                    // (only planar/cylindrical/conical faces can actually
                    // be drafted -- OCCT's own restriction, not this

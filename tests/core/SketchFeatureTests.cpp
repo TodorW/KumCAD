@@ -393,16 +393,13 @@ TEST_CASE("Document3D Sweep of a circle along a straight path matches a cylinder
     REQUIRE(volumeOf(doc.shapeAt(sweepIdx)) == Approx(M_PI * radius * radius * length).epsilon(1e-3));
 }
 
-TEST_CASE("Document3D Sweep rejects a multi-segment path (MakePipe needs a G1-continuous spine)",
+TEST_CASE("Document3D Sweep follows a multi-segment (sharp-cornered) path, with roughly the combined "
+         "volume of both legs",
          "[core3d][sweep]") {
-    // A real, disclosed scope cut (see FeatureType::Sweep's own comment):
-    // BRepOffsetAPI_MakePipe requires a G1-continuous spine, which a
-    // sharp-cornered polyline path isn't -- rather than silently produce
-    // a malformed shape at the corner (a real failure mode this test
-    // caught: an early draft's 2-segment sweep came back with almost
-    // exactly the FIRST segment's own volume, meaning the second
-    // segment's contribution was silently lost), this is rejected
-    // outright as invalid.
+    // A real, disclosed capability now (see FeatureType::Sweep's own
+    // comment): BRepOffsetAPI_MakePipeShell with an explicit RightCorner
+    // transition mode handles a sharp-cornered polyline spine that
+    // MakePipe's own G1-continuity requirement couldn't.
     Document3D doc;
     Sketch profile;
     profile.addCircle(profile.addPoint(Point2D(0, 0), true), 2.0);
@@ -420,7 +417,58 @@ TEST_CASE("Document3D Sweep rejects a multi-segment path (MakePipe needs a G1-co
     sweep.type = FeatureType::Sweep;
     sweep.sketchIndex = profileIdx;
     sweep.pathSketchIndex = pathIdx;
-    REQUIRE_FALSE(doc.isValid(doc.addFeature(sweep)));
+    const int sweepIdx = doc.addFeature(sweep);
+
+    REQUIRE(doc.isValid(sweepIdx));
+    // Two 10-unit legs of a radius-2 pipe meeting at a right angle: a
+    // RightCorner miter joint between two EQUAL-radius round pipes is a
+    // symmetric wedge exchange (the sliver added to one leg's own miter
+    // cut is congruent to the sliver it takes from the other), so the
+    // total volume comes out essentially identical to two independent
+    // cylinders' worth, not more.
+    const double radius = 2.0;
+    const double twoCylinders = M_PI * radius * radius * 20.0;
+    REQUIRE(volumeOf(doc.shapeAt(sweepIdx)) == Approx(twoCylinders).epsilon(0.01));
+}
+
+TEST_CASE("Document3D Sweep follows a filleted-corner path (line, tangent arc, line), matching the sum "
+         "of a cylinder, a quarter-torus, and a cylinder",
+         "[core3d][sweep]") {
+    Document3D doc;
+    Sketch profile;
+    profile.addCircle(profile.addPoint(Point2D(0, 0), true), 1.0);
+    const int profileIdx = doc.addSketch(profile);
+
+    // A straight run along +X, a tangent quarter-circle arc (radius 10)
+    // curving up to +Y, then a straight run along +Y -- a genuinely
+    // G1-continuous "filleted corner" path, real FreeCAD's own most
+    // common Sweep use beyond a single straight line.
+    Sketch path;
+    const int p0 = path.addPoint(Point2D(0, 0), true);
+    const int p1 = path.addPoint(Point2D(10, 0), true);
+    const int arcCenter = path.addPoint(Point2D(10, 10), true);
+    const int p2 = path.addPoint(Point2D(20, 10), true);
+    const int p3 = path.addPoint(Point2D(20, 20), true);
+    path.addLine(p0, p1);
+    path.addArc(arcCenter, p1, p2, 10.0, true);
+    path.addLine(p2, p3);
+    const int pathIdx = doc.addSketch(path);
+
+    Feature3D sweep;
+    sweep.type = FeatureType::Sweep;
+    sweep.sketchIndex = profileIdx;
+    sweep.pathSketchIndex = pathIdx;
+    const int sweepIdx = doc.addFeature(sweep);
+
+    REQUIRE(doc.isValid(sweepIdx));
+    // Cylinder + quarter-torus + cylinder, all radius-1 profile: since
+    // every join here is genuinely tangent (no real corner for
+    // RightCorner's own miter to do anything at), this should match the
+    // plain Pappus sum closely.
+    const double profileArea = M_PI * 1.0 * 1.0;
+    const double archLength = (M_PI / 2.0) * 10.0; // quarter circle, radius 10
+    const double expected = profileArea * 10.0 + profileArea * archLength + profileArea * 10.0;
+    REQUIRE(volumeOf(doc.shapeAt(sweepIdx)) == Approx(expected).epsilon(0.02));
 }
 
 TEST_CASE("Document3D Sweep rejects an empty path or out-of-range sketch indices", "[core3d][sweep]") {

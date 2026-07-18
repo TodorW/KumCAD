@@ -228,6 +228,71 @@ TEST_CASE("runErc flags multiple Output pins tied to the same net", "[schematic]
     REQUIRE(hasConflict);
 }
 
+TEST_CASE("runErc flags a Power pin wired to another Power pin with nothing actually driving the net",
+         "[schematic][erc]") {
+    Document doc;
+    doc.addBlock("IC", {});
+    BlockDefinition* ic = doc.findBlock("IC");
+    ic->pins.push_back(Pin{"VCC", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(-5, 0)});
+
+    doc.addBlock("RELAY", {});
+    BlockDefinition* relay = doc.findBlock("RELAY");
+    relay->pins.push_back(Pin{"A1", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(-5, 0)});
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), ic, Point2D(0, 0)));
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), relay, Point2D(0, 20)));
+    doc.addEntity(std::make_unique<WireEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                               std::vector<Point2D>{Point2D(0, 0), Point2D(0, 20)}));
+
+    const std::vector<Net> nets = computeNets(doc);
+    const std::vector<ErcIssue> issues = runErc(doc, nets);
+
+    const bool hasUndriven = std::any_of(issues.begin(), issues.end(), [](const ErcIssue& issue) {
+        return issue.message.find("not driven") != std::string::npos;
+    });
+    REQUIRE(hasUndriven);
+}
+
+TEST_CASE("runErc does NOT flag a Power pin when a PowerOutput or Output pin is on the same net",
+         "[schematic][erc]") {
+    Document doc;
+    doc.addBlock("IC", {});
+    BlockDefinition* ic = doc.findBlock("IC");
+    ic->pins.push_back(Pin{"VCC", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(-5, 0)});
+
+    doc.addBlock("BATTERY", {});
+    BlockDefinition* battery = doc.findBlock("BATTERY");
+    battery->pins.push_back(Pin{"+", "1", PinElectricalType::PowerOutput, Point2D(0, 0), Point2D(-5, 0)});
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), ic, Point2D(0, 0)));
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), battery, Point2D(0, 20)));
+    doc.addEntity(std::make_unique<WireEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                               std::vector<Point2D>{Point2D(0, 0), Point2D(0, 20)}));
+
+    const std::vector<Net> nets = computeNets(doc);
+    const std::vector<ErcIssue> issues = runErc(doc, nets);
+
+    const bool hasUndriven = std::any_of(issues.begin(), issues.end(), [](const ErcIssue& issue) {
+        return issue.message.find("not driven") != std::string::npos;
+    });
+    REQUIRE_FALSE(hasUndriven);
+}
+
+TEST_CASE("runErc does not double-report a lone Power pin: only the plain \"unconnected\" warning fires",
+         "[schematic][erc]") {
+    Document doc;
+    doc.addBlock("IC", {});
+    BlockDefinition* ic = doc.findBlock("IC");
+    ic->pins.push_back(Pin{"VCC", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(-5, 0)});
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), ic, Point2D(0, 0)));
+
+    const std::vector<Net> nets = computeNets(doc);
+    const std::vector<ErcIssue> issues = runErc(doc, nets);
+
+    REQUIRE(issues.size() == 1);
+    REQUIRE(issues[0].message.find("unconnected") != std::string::npos);
+}
+
 TEST_CASE("formatNetlist lists nets with resolved reference designators", "[schematic][netlist]") {
     Document doc;
     const BlockDefinition* r = addTwoPinSymbol(doc, "R");

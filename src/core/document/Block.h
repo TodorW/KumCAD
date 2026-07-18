@@ -78,9 +78,13 @@ enum class PinElectricalType {
     Bidirectional,
     TriState,
     Passive,
-    Power,
+    Power, // a power INPUT (a load): needs an Output or PowerOutput pin driving its own net -- see Erc.h
     OpenCollector,
     NotConnected,
+    // A power SOURCE (a battery/supply terminal, real KiCad's own distinct
+    // "Power Output" pin type) -- added after the original 8 values so
+    // existing DXF files' stored integer pin-type codes stay valid.
+    PowerOutput,
 };
 
 // One connection point on a schematic symbol. position is the wire

@@ -27,6 +27,13 @@ struct ErcIssue {
 //  - a pin whose electrical type is NotConnected but whose net has more
 //    than one pin (it *is* wired to something) -- Warning.
 //  - a net with more than one Output-type pin (driver conflict) -- Error.
+//  - a net with a Power-type pin (a power INPUT -- an IC's VCC/GND, a
+//    relay coil terminal, etc.) but no Output or PowerOutput pin
+//    anywhere on it (nothing actually sourcing that power) -- Warning,
+//    real KiCad's own "input power pin not driven" check, one of its
+//    most common real findings (a supply pin left dangling). PowerOutput
+//    is the distinct pin type a real power source (a battery/regulator
+//    terminal) uses -- see PinElectricalType in Block.h.
 std::vector<ErcIssue> runErc(const Document& doc, const std::vector<Net>& nets);
 
 } // namespace lcad

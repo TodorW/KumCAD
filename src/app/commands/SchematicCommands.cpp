@@ -74,9 +74,8 @@ std::optional<QString> PinAddCommand::onText(const QString& text) {
         if (trimmed.isEmpty()) return QStringLiteral("*Pin number can't be empty*\nEnter pin number:");
         m_pinNumber = trimmed.toStdString();
         m_stage = Stage::ElectricalType;
-        return QStringLiteral(
-            "Electrical type [Input/Output/Bidirectional/Tristate/Passive/Power/OpenCollector/NotConnected] "
-            "<Passive>:");
+        return QStringLiteral("Electrical type [Input/Output/Bidirectional/Tristate/Passive/Power/PowerOutput/"
+                              "OpenCollector/NotConnected] <Passive>:");
     case Stage::ElectricalType: {
         const QString t = trimmed.toUpper();
         if (t.isEmpty() || t == QLatin1String("PASSIVE")) m_electricalType = lcad::PinElectricalType::Passive;
@@ -85,6 +84,7 @@ std::optional<QString> PinAddCommand::onText(const QString& text) {
         else if (t == QLatin1String("BIDIRECTIONAL")) m_electricalType = lcad::PinElectricalType::Bidirectional;
         else if (t == QLatin1String("TRISTATE")) m_electricalType = lcad::PinElectricalType::TriState;
         else if (t == QLatin1String("POWER")) m_electricalType = lcad::PinElectricalType::Power;
+        else if (t == QLatin1String("POWEROUTPUT")) m_electricalType = lcad::PinElectricalType::PowerOutput;
         else if (t == QLatin1String("OPENCOLLECTOR")) m_electricalType = lcad::PinElectricalType::OpenCollector;
         else if (t == QLatin1String("NOTCONNECTED")) m_electricalType = lcad::PinElectricalType::NotConnected;
         else return QStringLiteral("*Unrecognized type*\nElectrical type <Passive>:");

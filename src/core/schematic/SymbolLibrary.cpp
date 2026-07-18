@@ -234,8 +234,8 @@ void registerBuiltinSymbols(Document& doc) {
         addLine(doc, body, Point2D(9, -5), Point2D(9, 5));   // + plate (tall)
         addLine(doc, body, Point2D(11, -3), Point2D(11, 3)); // - plate (short)
         std::vector<Pin> pins = {
-            Pin{"1", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(9, 0)},  // +
-            Pin{"2", "2", PinElectricalType::Power, Point2D(20, 0), Point2D(11, 0)}, // -
+            Pin{"1", "1", PinElectricalType::PowerOutput, Point2D(0, 0), Point2D(9, 0)},  // +
+            Pin{"2", "2", PinElectricalType::PowerOutput, Point2D(20, 0), Point2D(11, 0)}, // -
         };
         addIfMissing(doc, "V", std::move(body), std::move(pins));
     }
@@ -250,8 +250,8 @@ void registerBuiltinSymbols(Document& doc) {
         addLine(doc, body, Point2D(14, 0), Point2D(11, 2));
         addLine(doc, body, Point2D(14, 0), Point2D(11, -2));
         std::vector<Pin> pins = {
-            Pin{"1", "1", PinElectricalType::Power, Point2D(0, 0), Point2D(4, 0)},
-            Pin{"2", "2", PinElectricalType::Power, Point2D(20, 0), Point2D(16, 0)},
+            Pin{"1", "1", PinElectricalType::PowerOutput, Point2D(0, 0), Point2D(4, 0)},
+            Pin{"2", "2", PinElectricalType::PowerOutput, Point2D(20, 0), Point2D(16, 0)},
         };
         addIfMissing(doc, "I", std::move(body), std::move(pins));
     }

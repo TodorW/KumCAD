@@ -42,6 +42,9 @@ std::vector<ErcIssue> runErc(const Document& doc, const std::vector<Net>& nets) 
 
     for (const Net& net : nets) {
         int outputCount = 0;
+        int driverCount = 0; // Output or PowerOutput -- anything that can actually source this net
+        bool hasPowerInput = false;
+        EntityId firstPowerInputId = 0;
         for (const NetPin& np : net.pins) {
             const InsertEntity* insert = findInsert(doc, np.insertId);
             if (!insert) continue;
@@ -61,13 +64,31 @@ std::vector<ErcIssue> runErc(const Document& doc, const std::vector<Net>& nets) 
                                   np.insertId});
             }
 
-            if (pin->electricalType == PinElectricalType::Output) ++outputCount;
+            if (pin->electricalType == PinElectricalType::Output) {
+                ++outputCount;
+                ++driverCount;
+            } else if (pin->electricalType == PinElectricalType::PowerOutput) {
+                ++driverCount;
+            } else if (pin->electricalType == PinElectricalType::Power && !hasPowerInput) {
+                hasPowerInput = true;
+                firstPowerInputId = np.insertId;
+            }
         }
         if (outputCount > 1) {
             issues.push_back(
                 {ErcIssue::Severity::Error, "Net \"" + net.name + "\" has " + std::to_string(outputCount) +
                                                 " Output pins driving it (conflict)",
                  0});
+        }
+        // net.pins.size() > 1: a lone Power pin already gets the plain
+        // "unconnected" warning above -- this check is specifically for
+        // a Power pin that IS wired to something, just nothing that can
+        // actually source it, so the two never double up on one pin.
+        if (net.pins.size() > 1 && hasPowerInput && driverCount == 0) {
+            issues.push_back({ErcIssue::Severity::Warning,
+                              "Net \"" + net.name + "\" has a Power pin but no Output or PowerOutput pin "
+                                                    "driving it (input power pin not driven)",
+                              firstPowerInputId});
         }
     }
 

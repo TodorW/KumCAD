@@ -59,17 +59,35 @@ void insertFlatPatternIntoDocument(Document& doc2d, const SheetMetalPart& part, 
 // (numbered the same way pickFace's faceIndex does): 0 degrees continues
 // coplanar with that face, 90 degrees rises perpendicular to it (the
 // common right-angle-flange case), matching the intuitive parametrization
-// real sheet-metal tools use for this same operation. thickness is passed
-// explicitly rather than measured from target (detecting "the" thickness
-// of an arbitrary solid is a much harder, separate problem, out of scope
-// here) -- pass the same thickness the rest of the part uses. The new
-// wall is fused flat (a sharp corner, no bend-radius fillet) onto target;
-// if a rounded bend is wanted, pick the new seam edge afterward (via
-// Pick3D.h/Window3D's "List Edges...") and apply a real Fillet feature to
-// it -- reusing that existing capability rather than duplicating bend-
-// radius logic here. Returns a null shape if target is null, the indices
-// are out of range, length/thickness are non-positive, or the picked
-// edge/face geometry is too degenerate to resolve a flange direction from
+// real sheet-metal tools use for this same operation. Pass thickness
+// explicitly to use exactly that value, or 0.0 to auto-detect it: a ray
+// cast straight through the reference face finds the nearest OTHER face
+// target itself has along that normal, and its distance becomes the
+// detected thickness -- matching real sheet-metal tools' own "pick a
+// face, thickness is read from the part" behavior. Auto-detection only
+// works when target really is sheet-stock-thin at that face (a straight
+// ray exits through exactly one more face); anything else (a thick
+// block, a non-parallel opposite face, an open edge) fails detection and
+// the whole call returns a null shape the same as any other invalid
+// input -- pass an explicit thickness instead for those cases. The new
+// wall is fused flat (a sharp corner, no bend-radius fillet) onto target.
+// Deliberately NOT auto-rounded here: filleting the fresh seam a flush
+// edge-to-edge boolean fuse like this one produces was tried (radius
+// applied automatically, right after the fuse) and found to reliably
+// crash OCCT's own ChFi3d fillet builder deep inside libTKFillet on
+// perfectly ordinary inputs -- a real upstream robustness bug in
+// filleting a Boolean result's own seam edge near the T-junction
+// vertices a partial-edge weld like this creates, not a bug in this
+// function's own edge-finding logic. Picking the new seam edge afterward
+// (via Pick3D.h/Window3D's "List Edges...") and applying Fillet as a
+// separate, later feature on the ALREADY-COMMITTED shape carries the
+// same real risk if attempted immediately -- if it happens, undo and
+// either accept the sharp corner or try a larger/smaller radius; this
+// isn't something buildFaceFlange itself can detect or prevent.
+// Returns a null shape if target is null, the indices are out of range,
+// length is non-positive, thickness is negative (or zero and
+// auto-detection also failed), or the picked edge/face geometry is too
+// degenerate to resolve a flange direction from
 // (e.g. the edge's midpoint coincides with the face's own centroid).
 TopoDS_Shape buildFaceFlange(const TopoDS_Shape& target, int edgeIndex, int referenceFaceIndex, double length,
                              double bendAngleDegrees, double thickness);

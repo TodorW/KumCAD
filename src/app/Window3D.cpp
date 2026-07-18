@@ -565,10 +565,10 @@ public:
         m_bendAngle->setValue(90.0);
         form->addRow(QStringLiteral("Bend Angle (deg, 0=coplanar, 90=perpendicular):"), m_bendAngle);
         m_thickness = new QDoubleSpinBox(this);
-        m_thickness->setRange(0.01, 1e6);
+        m_thickness->setRange(0.0, 1e6);
         m_thickness->setDecimals(3);
-        m_thickness->setValue(2.0);
-        form->addRow(QStringLiteral("Thickness:"), m_thickness);
+        m_thickness->setValue(0.0);
+        form->addRow(QStringLiteral("Thickness (0 = auto-detect from reference face):"), m_thickness);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);

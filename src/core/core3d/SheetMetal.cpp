@@ -15,7 +15,9 @@
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <IntCurvesFace_Intersector.hxx>
 #include <Standard_Failure.hxx>
+#include <Standard_Real.hxx>
 #include <TopExp.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -26,6 +28,7 @@
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
@@ -203,9 +206,48 @@ void insertFlatPatternIntoDocument(Document& doc2d, const SheetMetalPart& part, 
     }
 }
 
+namespace {
+// Measures target's own local wall thickness at startPoint by casting a
+// ray inward from just outside startFace (along -normal) and finding the
+// nearest OTHER face it hits -- the same real ray-face intersection
+// Pick3D.h's own pickFace uses (IntCurvesFace_Intersector), just walked
+// over every face of target instead of stopping at the first hit, since
+// the first hit here would just be startFace's own near-zero-distance
+// re-entry. Returns 0.0 if no second face is hit (e.g. the ray exits the
+// solid entirely without crossing anything parallel -- not every solid
+// is sheet-stock-thin along its own face normal).
+double detectThicknessAlongNormal(const TopoDS_Shape& target, const TopoDS_Face& startFace, const gp_Pnt& startPoint,
+                                  const gp_Dir& normal) {
+    const gp_Pnt origin = startPoint.Translated(gp_Vec(normal) * 1e-4);
+    const gp_Lin line(origin, normal.Reversed());
+
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(target, TopAbs_FACE, faceMap);
+
+    bool found = false;
+    double best = 0.0;
+    for (int i = 1; i <= faceMap.Extent(); ++i) {
+        const TopoDS_Face candidate = TopoDS::Face(faceMap(i));
+        if (candidate.IsSame(startFace)) continue;
+        IntCurvesFace_Intersector intersector(candidate, 1e-6);
+        intersector.Perform(line, 0.0, Standard_Real(RealLast()));
+        if (!intersector.IsDone()) continue;
+        for (int j = 1; j <= intersector.NbPnt(); ++j) {
+            const double w = intersector.WParameter(j);
+            if (w < 0.0) continue;
+            if (!found || w < best) {
+                best = w;
+                found = true;
+            }
+        }
+    }
+    return found ? best : 0.0;
+}
+} // namespace
+
 TopoDS_Shape buildFaceFlange(const TopoDS_Shape& target, int edgeIndex, int referenceFaceIndex, double length,
                              double bendAngleDegrees, double thickness) {
-    if (target.IsNull() || length <= 1e-9 || thickness <= 1e-9) return TopoDS_Shape();
+    if (target.IsNull() || length <= 1e-9 || thickness < 0.0) return TopoDS_Shape();
 
     TopTools_IndexedMapOfShape edgeMap;
     TopTools_IndexedMapOfShape faceMap;
@@ -243,6 +285,16 @@ TopoDS_Shape buildFaceFlange(const TopoDS_Shape& target, int edgeIndex, int refe
     BRepGProp::SurfaceProperties(face, massProps);
     const gp_Pnt faceCentroid = massProps.CentreOfMass();
     const gp_Pnt edgeMid((p1.X() + p2.X()) / 2.0, (p1.Y() + p2.Y()) / 2.0, (p1.Z() + p2.Z()) / 2.0);
+
+    // thickness == 0 requests auto-detection: measure target's own local
+    // wall thickness at the reference face by casting a ray straight
+    // through it (see detectThicknessAlongNormal above), rather than
+    // requiring the caller to already know it -- matching real
+    // sheet-metal tools' own "pick a face, thickness is read from the
+    // part" behavior. Falls through to the invalid-input return below if
+    // detection fails (e.g. target isn't actually sheet-stock-thin there).
+    if (thickness < 1e-9) thickness = detectThicknessAlongNormal(target, face, faceCentroid, normal);
+    if (thickness < 1e-9) return TopoDS_Shape();
 
     // The in-plane direction pointing from the face's own center toward
     // the picked edge (and, by continuation, past it into open space) --

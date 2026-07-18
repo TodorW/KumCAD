@@ -186,5 +186,66 @@ TEST_CASE("buildFaceFlange rejects invalid input", "[core3d][sheetmetal][flange]
     REQUIRE(buildFaceFlange(box, 999, 0, 5.0, 90.0, 2.0).IsNull());  // bad edge index
     REQUIRE(buildFaceFlange(box, 0, 999, 5.0, 90.0, 2.0).IsNull());  // bad face index
     REQUIRE(buildFaceFlange(box, 0, 0, 0.0, 90.0, 2.0).IsNull());    // non-positive length
-    REQUIRE(buildFaceFlange(box, 0, 0, 5.0, 90.0, 0.0).IsNull());    // non-positive thickness
+    REQUIRE(buildFaceFlange(box, 0, 0, 5.0, 90.0, -1.0).IsNull());   // negative thickness
+}
+
+TEST_CASE("buildFaceFlange with thickness 0.0 auto-detects the wall thickness from the reference face",
+         "[core3d][sheetmetal][flange]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 2.0).Shape();
+
+    PickRay topRay;
+    topRay.origin = {10.0, 5.0, 100.0};
+    topRay.direction = {0.0, 0.0, -1.0};
+    const auto topFace = pickFace(box, topRay);
+    REQUIRE(topFace.has_value());
+
+    PickRay edgeRay;
+    edgeRay.origin = {10.0, -0.1, 2.0};
+    edgeRay.direction = {0.0, 1.0, 0.0};
+    const auto edge = pickEdge(box, edgeRay, 0.5);
+    REQUIRE(edge.has_value());
+
+    // A ray cast inward from the top face (z=2) hits the bottom face
+    // (z=0) after exactly 2.0 units -- the box's own real thickness --
+    // so thickness=0.0 should auto-detect 2.0 and build the identical
+    // flange an explicit thickness=2.0 call would.
+    const TopoDS_Shape autoDetected = buildFaceFlange(box, edge->edgeIndex, topFace->faceIndex, 5.0, 90.0, 0.0);
+    REQUIRE_FALSE(autoDetected.IsNull());
+    const TopoDS_Shape explicitThickness = buildFaceFlange(box, edge->edgeIndex, topFace->faceIndex, 5.0, 90.0, 2.0);
+    REQUIRE_FALSE(explicitThickness.IsNull());
+    // A small systematic overshoot is expected: the detection ray starts
+    // 1e-4 units outside the reference face (see detectThicknessAlongNormal's
+    // own comment) to avoid immediately re-hitting that same face, so the
+    // measured distance is thickness + ~1e-4, not exactly thickness.
+    REQUIRE(volumeOfShape(autoDetected) == Approx(volumeOfShape(explicitThickness)).margin(0.02));
+}
+
+TEST_CASE("buildFaceFlange with thickness 0.0 auto-detects whatever distance is actually there, even on "
+         "a non-plate-shaped solid",
+         "[core3d][sheetmetal][flange]") {
+    // A cube (10x10x10) has no distinguished "thin" direction the way a
+    // 20x10x2 plate does, but a ray straight through any face of a
+    // convex solid like this one still hits exactly one opposite face,
+    // so auto-detection still succeeds (at 10.0, the cube's own full
+    // extent) -- confirming detection isn't secretly relying on some
+    // "is this sheet-metal-shaped" heuristic, just the geometric ray
+    // cast the header documents.
+    const TopoDS_Shape cube = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+
+    PickRay topRay;
+    topRay.origin = {5.0, 5.0, 100.0};
+    topRay.direction = {0.0, 0.0, -1.0};
+    const auto topFace = pickFace(cube, topRay);
+    REQUIRE(topFace.has_value());
+
+    PickRay edgeRay;
+    edgeRay.origin = {5.0, -0.1, 10.0};
+    edgeRay.direction = {0.0, 1.0, 0.0};
+    const auto edge = pickEdge(cube, edgeRay, 0.5);
+    REQUIRE(edge.has_value());
+
+    const TopoDS_Shape flanged = buildFaceFlange(cube, edge->edgeIndex, topFace->faceIndex, 5.0, 90.0, 0.0);
+    REQUIRE_FALSE(flanged.IsNull());
+    const double expected = 10.0 * 10.0 * 10.0 + 10.0 * 5.0 * 10.0; // cube plus a 10x5x10 wall
+    REQUIRE(volumeOfShape(flanged) == Approx(expected).margin(0.01)); // small detection-epsilon overshoot, see above
 }

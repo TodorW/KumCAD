@@ -125,6 +125,57 @@ TEST_CASE("autoroute fails and reports the net when a pin is completely walled i
     REQUIRE(trackCount(doc) == 0);
 }
 
+TEST_CASE("autoroute's rip-up-and-reroute recovers a connection a single shortest-first pass leaves unrouted",
+         "[pcb][autoroute][ripup]") {
+    // CONSTRAINED (TARGET->FAR, length 10) has exactly one way out of
+    // TARGET: south/east/west are sealed by wall pads (BS/BE/BW, each
+    // 1.2 away -- close enough to obstacle-block those three directions
+    // but not the fourth, verified empirically), leaving only north
+    // open. FLEXIBLE (R3->R4, length 6) crosses directly over that one
+    // exit, horizontally. Under plain shortest-first ordering, FLEXIBLE
+    // (shorter) routes first and seals TARGET's only exit, so
+    // CONSTRAINED fails -- even though CONSTRAINED WOULD have succeeded
+    // if it had gone first (its exit is unobstructed until FLEXIBLE
+    // claims it), and FLEXIBLE has plenty of open space to detour around
+    // CONSTRAINED's track if forced to go second instead.
+    auto build = [](Document& doc) {
+        registerBuiltinSymbols(doc);
+        placeRFp(doc, "TARGET", Point2D(0, 0));
+        placeRFp(doc, "FAR", Point2D(0, 10));
+        placeRFp(doc, "BS", Point2D(0, -1.2));
+        placeRFp(doc, "BE", Point2D(1.2, 0));
+        placeRFp(doc, "BW", Point2D(-1.2, 0));
+        placeRFp(doc, "R3", Point2D(-3, 1));
+        placeRFp(doc, "R4", Point2D(3, 1));
+    };
+    ImportedNet constrained;
+    constrained.name = "CONSTRAINED";
+    constrained.pins = {{"TARGET", "1"}, {"FAR", "1"}};
+    ImportedNet flexible;
+    flexible.name = "FLEXIBLE";
+    flexible.pins = {{"R3", "1"}, {"R4", "1"}};
+
+    Document withoutRipUp;
+    build(withoutRipUp);
+    AutorouteParams noRetry;
+    noRetry.ripUpPasses = 0;
+    const AutorouteResult plainResult = autoroute(withoutRipUp, {constrained, flexible}, noRetry);
+    REQUIRE(plainResult.routedCount == 1);
+    REQUIRE(plainResult.failedCount == 1);
+    REQUIRE(plainResult.failedNetNames == std::vector<std::string>{"CONSTRAINED"});
+
+    Document withRipUp;
+    build(withRipUp);
+    AutorouteParams retry;
+    retry.ripUpPasses = 3;
+    const AutorouteResult retriedResult = autoroute(withRipUp, {constrained, flexible}, retry);
+    REQUIRE(retriedResult.routedCount == 2);
+    REQUIRE(retriedResult.failedCount == 0);
+    // Ripping up a losing attempt must actually remove its tracks --
+    // exactly one TrackEntity per successfully routed net, no leftovers.
+    REQUIRE(trackCount(withRipUp) == 2);
+}
+
 TEST_CASE("autoroute on an empty document or with a non-positive grid size is a safe no-op", "[pcb][autoroute]") {
     Document doc;
     registerBuiltinSymbols(doc);

@@ -38,6 +38,17 @@ struct PendingConnection {
     std::string netName;
 };
 
+struct RoutingPass {
+    AutorouteResult result;
+    std::vector<EntityId> addedTrackIds;
+    // Indices into the orderedPending list this pass was given, for
+    // whichever connections failed -- used to rebuild the next rip-up
+    // attempt's ordering without matching on netName strings (which
+    // aren't unique: a multi-pin net's own MST can produce more than one
+    // PendingConnection sharing the same net name).
+    std::vector<int> failedIndices;
+};
+
 // Marks every grid cell within radius of center as an obstacle, only
 // scanning that cell's own local bounding box (not the whole grid) for
 // efficiency.
@@ -133,6 +144,86 @@ std::vector<Point2D> simplifyPath(const std::vector<Point2D>& raw) {
     return out;
 }
 
+// One shortest-first Lee/maze pass over orderedPending, in the order
+// given (the caller controls ordering -- the initial pass sorts
+// shortest-first; a rip-up retry instead puts the previous attempt's
+// failures first). Adds a real TrackEntity to doc per success.
+RoutingPass runRoutingPass(Document& doc, const std::vector<PendingConnection>& orderedPending,
+                           const std::vector<PlacedPad>& allPads, int nx, int ny, double minX, double minY,
+                           const AutorouteParams& params, const std::vector<NetClass>& netClasses) {
+    RoutingPass pass;
+    std::vector<RoutedSegment> routedSegments;
+
+    for (std::size_t idx = 0; idx < orderedPending.size(); ++idx) {
+        const PendingConnection& conn = orderedPending[idx];
+        // netClasses (see NetClass.h) lets different nets route with
+        // their own track width/clearance -- a net with no matching
+        // class still falls back to params' own single global values,
+        // exactly the pre-existing behavior when netClasses is empty.
+        const NetClass* connClass = findNetClass(netClasses, conn.netName);
+        const double connTrackWidth = connClass ? connClass->trackWidth : params.trackWidth;
+        const double connClearance = connClass ? connClass->clearance : params.clearance;
+
+        std::vector<bool> obstacle(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny), false);
+        for (const PlacedPad& pad : allPads) {
+            if (!pad.netName.empty() && pad.netName == conn.netName) continue;
+            // Clearance to another net's copper uses the LARGER of the
+            // two nets' own required clearances (the same convention
+            // Drc.h's own per-net-class check uses), not just this
+            // connection's own.
+            const NetClass* padClass = findNetClass(netClasses, pad.netName);
+            const double padClearance = std::max(connClearance, padClass ? padClass->clearance : params.clearance);
+            // pad.radius is already the pad's own full extent (not a
+            // half-width needing a second half added on top of it) --
+            // only this connection's own track half-width needs adding.
+            markNearPoint(obstacle, nx, ny, minX, minY, params.gridSize, pad.position,
+                         pad.radius + connTrackWidth / 2.0 + padClearance);
+        }
+        for (const RoutedSegment& seg : routedSegments) {
+            if (seg.netName == conn.netName) continue;
+            const double segClearance = std::max(connClearance, seg.clearance);
+            markNearSegment(obstacle, nx, ny, minX, minY, params.gridSize, seg.a, seg.b,
+                           connTrackWidth / 2.0 + segClearance + seg.trackWidth / 2.0);
+        }
+
+        const GridCell start = toCell(conn.line.a, minX, minY, params.gridSize);
+        const GridCell goal = toCell(conn.line.b, minX, minY, params.gridSize);
+        auto clearCell = [&](GridCell c) {
+            if (c.x >= 0 && c.x < nx && c.y >= 0 && c.y < ny) {
+                obstacle[static_cast<std::size_t>(c.y) * static_cast<std::size_t>(nx) + static_cast<std::size_t>(c.x)] = false;
+            }
+        };
+        clearCell(start);
+        clearCell(goal);
+
+        const std::vector<GridCell> cellPath = bfsRoute(obstacle, nx, ny, start, goal);
+        if (cellPath.empty()) {
+            ++pass.result.failedCount;
+            pass.result.failedNetNames.push_back(conn.netName);
+            pass.failedIndices.push_back(static_cast<int>(idx));
+            continue;
+        }
+
+        std::vector<Point2D> worldPath;
+        worldPath.reserve(cellPath.size());
+        for (const GridCell& c : cellPath) worldPath.push_back(toWorld(c, minX, minY, params.gridSize));
+        worldPath.front() = conn.line.a; // snap the endpoints back to the exact pad positions
+        worldPath.back() = conn.line.b;
+        const std::vector<Point2D> simplified = simplifyPath(worldPath);
+
+        auto track = std::make_unique<TrackEntity>(doc.reserveEntityId(), params.layer, simplified, connTrackWidth);
+        const EntityId trackId = track->id();
+        doc.addEntity(std::move(track));
+        pass.addedTrackIds.push_back(trackId);
+        for (std::size_t i = 0; i + 1 < simplified.size(); ++i) {
+            routedSegments.push_back({simplified[i], simplified[i + 1], conn.netName, connTrackWidth, connClearance});
+        }
+        ++pass.result.routedCount;
+    }
+
+    return pass;
+}
+
 } // namespace
 
 AutorouteResult autoroute(Document& doc, const std::vector<ImportedNet>& nets, const AutorouteParams& params,
@@ -183,71 +274,42 @@ AutorouteResult autoroute(Document& doc, const std::vector<ImportedNet>& nets, c
         return a.line.a.distanceTo(a.line.b) < b.line.a.distanceTo(b.line.b);
     });
 
-    std::vector<RoutedSegment> routedSegments;
+    RoutingPass best = runRoutingPass(doc, pending, allPads, nx, ny, minX, minY, params, netClasses);
 
-    for (const PendingConnection& conn : pending) {
-        // netClasses (see NetClass.h) lets different nets route with
-        // their own track width/clearance -- a net with no matching
-        // class still falls back to params' own single global values,
-        // exactly the pre-existing behavior when netClasses is empty.
-        const NetClass* connClass = findNetClass(netClasses, conn.netName);
-        const double connTrackWidth = connClass ? connClass->trackWidth : params.trackWidth;
-        const double connClearance = connClass ? connClass->clearance : params.clearance;
-
-        std::vector<bool> obstacle(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny), false);
-        for (const PlacedPad& pad : allPads) {
-            if (!pad.netName.empty() && pad.netName == conn.netName) continue;
-            // Clearance to another net's copper uses the LARGER of the
-            // two nets' own required clearances (the same convention
-            // Drc.h's own per-net-class check uses), not just this
-            // connection's own.
-            const NetClass* padClass = findNetClass(netClasses, pad.netName);
-            const double padClearance = std::max(connClearance, padClass ? padClass->clearance : params.clearance);
-            // pad.radius is already the pad's own full extent (not a
-            // half-width needing a second half added on top of it) --
-            // only this connection's own track half-width needs adding.
-            markNearPoint(obstacle, nx, ny, minX, minY, params.gridSize, pad.position,
-                         pad.radius + connTrackWidth / 2.0 + padClearance);
-        }
-        for (const RoutedSegment& seg : routedSegments) {
-            if (seg.netName == conn.netName) continue;
-            const double segClearance = std::max(connClearance, seg.clearance);
-            markNearSegment(obstacle, nx, ny, minX, minY, params.gridSize, seg.a, seg.b,
-                           connTrackWidth / 2.0 + segClearance + seg.trackWidth / 2.0);
+    // Rip-up-and-reroute: a real, if simple/global (not localized "rip up
+    // exactly the one blocking trace" the way a true push-and-shove
+    // router would), technique -- sometimes a connection only failed
+    // because an earlier, successfully-routed one happened to claim the
+    // only viable corridor first under pure shortest-first ordering.
+    // Retrying with the previously-failed connections given first pick
+    // this time can recover some of those routes, at the cost of
+    // possibly displacing ones that succeeded before; each attempt's
+    // tracks are ripped up (removed from doc) before the next attempt,
+    // and only the attempt with the fewest failures is kept. Not KiCad's
+    // own interactive push-and-shove router -- that needs live mouse-
+    // drag physics during routing this batch/typed-command architecture
+    // has no interactive viewport plumbing for; this is the bounded
+    // alternative that's actually buildable here.
+    for (int attempt = 0; attempt < params.ripUpPasses && best.result.failedCount > 0; ++attempt) {
+        std::vector<PendingConnection> reordered;
+        reordered.reserve(pending.size());
+        std::vector<bool> wasFailedIndex(pending.size(), false);
+        for (int idx : best.failedIndices) wasFailedIndex[static_cast<std::size_t>(idx)] = true;
+        for (int idx : best.failedIndices) reordered.push_back(pending[static_cast<std::size_t>(idx)]);
+        for (std::size_t i = 0; i < pending.size(); ++i) {
+            if (!wasFailedIndex[i]) reordered.push_back(pending[i]);
         }
 
-        const GridCell start = toCell(conn.line.a, minX, minY, params.gridSize);
-        const GridCell goal = toCell(conn.line.b, minX, minY, params.gridSize);
-        auto clearCell = [&](GridCell c) {
-            if (c.x >= 0 && c.x < nx && c.y >= 0 && c.y < ny) {
-                obstacle[static_cast<std::size_t>(c.y) * static_cast<std::size_t>(nx) + static_cast<std::size_t>(c.x)] = false;
-            }
-        };
-        clearCell(start);
-        clearCell(goal);
-
-        const std::vector<GridCell> cellPath = bfsRoute(obstacle, nx, ny, start, goal);
-        if (cellPath.empty()) {
-            ++result.failedCount;
-            result.failedNetNames.push_back(conn.netName);
-            continue;
+        RoutingPass retry = runRoutingPass(doc, reordered, allPads, nx, ny, minX, minY, params, netClasses);
+        if (retry.result.failedCount < best.result.failedCount) {
+            for (EntityId id : best.addedTrackIds) doc.removeEntity(id);
+            best = std::move(retry);
+        } else {
+            for (EntityId id : retry.addedTrackIds) doc.removeEntity(id);
         }
-
-        std::vector<Point2D> worldPath;
-        worldPath.reserve(cellPath.size());
-        for (const GridCell& c : cellPath) worldPath.push_back(toWorld(c, minX, minY, params.gridSize));
-        worldPath.front() = conn.line.a; // snap the endpoints back to the exact pad positions
-        worldPath.back() = conn.line.b;
-        const std::vector<Point2D> simplified = simplifyPath(worldPath);
-
-        doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), params.layer, simplified, connTrackWidth));
-        for (std::size_t i = 0; i + 1 < simplified.size(); ++i) {
-            routedSegments.push_back({simplified[i], simplified[i + 1], conn.netName, connTrackWidth, connClearance});
-        }
-        ++result.routedCount;
     }
 
-    return result;
+    return best.result;
 }
 
 } // namespace lcad

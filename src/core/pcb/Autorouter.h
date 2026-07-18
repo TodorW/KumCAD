@@ -16,6 +16,12 @@ struct AutorouteParams {
     double trackWidth = 0.25;
     double clearance = 0.2;
     LayerId layer = 0; // which layer newly-routed tracks land on
+    // Rip-up-and-reroute retries (see autoroute()'s own comment): each
+    // additional attempt rips up the current best attempt's tracks and
+    // retries with the previously-failed connections given first pick,
+    // keeping whichever attempt ends with the fewest failures. 0 keeps
+    // the original single shortest-first-only behavior.
+    int ripUpPasses = 3;
 };
 
 struct AutorouteResult {
@@ -40,13 +46,23 @@ struct AutorouteResult {
 // always force-cleared so a pin's own location never blocks its own
 // route regardless of nearby other-net pads.
 //
+// A failed connection isn't necessarily final: params.ripUpPasses
+// additional attempts each rip up the current best attempt's tracks and
+// retry with the previously-failed connections given first pick this
+// time (a real, if global rather than localized, rip-up-and-reroute
+// technique), keeping whichever attempt ends with the fewest failures.
+//
 // Real, disclosed simplifications: single layer only (no via insertion or
 // layer-change routing -- see the plan's own "multi-layer copper
-// stackup" as a separate, not-yet-done item), no push/shove of existing
-// traces, no length matching or differential pairs, and grid-based paths
-// (not the smooth 45-degree-preferring paths a real interactive router
-// produces) -- a real, useful "does it connect without shorting"
-// autorouter, not KiCad's own interactive push-and-shove router.
+// stackup" as a separate, not-yet-done item), no length matching or
+// differential pairs (LengthTuning.h/DiffPair.h cover those as their own
+// separate, dedicated tools instead), and grid-based paths (not the
+// smooth 45-degree-preferring paths a real interactive router produces)
+// -- a real, useful "does it connect without shorting" autorouter, still
+// not KiCad's own interactive push-and-shove router (that needs live
+// mouse-drag physics during routing, a kind of interactive viewport
+// plumbing this batch/typed-command architecture doesn't have -- rip-up-
+// and-reroute is the bounded alternative that's actually buildable here).
 //
 // Adds one TrackEntity per successfully routed connection directly to
 // doc, on params.layer.

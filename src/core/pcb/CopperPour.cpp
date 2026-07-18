@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <map>
+#include <numeric>
 
 namespace lcad {
 
@@ -27,10 +30,135 @@ bool pointInPolygon(const Point2D& p, const std::vector<Point2D>& poly) {
     return inside;
 }
 
-bool nearExempt(const Point2D& p, const std::vector<Point2D>& exemptPoints) {
+// Same union-find-by-coincident-endpoint connectivity tracer Drc.cpp and
+// Ratsnest.cpp each already build their own copy of, applied here so
+// exemption from the pour's own clearance check follows real electrical
+// connectivity (a track or via reaching an own-net pad/point through a
+// chain of other tracks/vias) instead of only exact coincidence with one
+// of ownNetPositions -- closing the limitation this file's own header
+// comment used to disclose.
+class UnionFind {
+public:
+    explicit UnionFind(std::size_t n) : m_parent(n) { std::iota(m_parent.begin(), m_parent.end(), 0); }
+    std::size_t find(std::size_t a) {
+        while (m_parent[a] != a) {
+            m_parent[a] = m_parent[m_parent[a]];
+            a = m_parent[a];
+        }
+        return a;
+    }
+    void unite(std::size_t a, std::size_t b) {
+        a = find(a);
+        b = find(b);
+        if (a != b) m_parent[a] = b;
+    }
+
+private:
+    std::vector<std::size_t> m_parent;
+};
+
+using Pos2D = std::pair<std::int64_t, std::int64_t>;
+Pos2D quantizeCoincidence(const Point2D& p) {
+    // Matches this file's own long-standing 1e-3 coincidence tolerance.
     constexpr double kEpsilon = 1e-3;
-    return std::any_of(exemptPoints.begin(), exemptPoints.end(),
-                       [&](const Point2D& e) { return p.distanceTo(e) < kEpsilon; });
+    return {static_cast<std::int64_t>(std::llround(p.x / kEpsilon)), static_cast<std::int64_t>(std::llround(p.y / kEpsilon))};
+}
+
+// True for every via/track/pad reachable, through a chain of touching
+// copper, from one of ownNetPositions -- not just the ones exactly AT an
+// own-net position.
+struct Connectivity {
+    std::vector<bool> viaExempt;
+    std::vector<bool> trackExempt;
+    // Parallel to the (via, track, pad) iteration order buildCopperPourWithClearance
+    // itself walks doc.entities() in -- padExempt is looked up by pad world
+    // position instead, since pads don't get their own std::vector here.
+    std::map<Pos2D, bool> padExemptByPosition;
+};
+
+Connectivity traceConnectivity(const Document& doc, const std::vector<Point2D>& ownNetPositions) {
+    Connectivity result;
+
+    std::vector<const TrackEntity*> tracks;
+    std::vector<const ViaEntity*> vias;
+    std::vector<const InsertEntity*> footprints;
+    for (const Entity* e : doc.entities()) {
+        if (e->type() == EntityType::Track) tracks.push_back(static_cast<const TrackEntity*>(e));
+        else if (e->type() == EntityType::Via) vias.push_back(static_cast<const ViaEntity*>(e));
+        else if (e->type() == EntityType::Insert) {
+            const auto* insert = static_cast<const InsertEntity*>(e);
+            if (insert->block() && insert->block()->isFootprint()) footprints.push_back(insert);
+        }
+    }
+
+    std::size_t totalVerts = 0;
+    for (const auto* t : tracks) totalVerts += t->vertices().size();
+    std::size_t padCount = 0;
+    for (const auto* fp : footprints) padCount += fp->block()->pads.size();
+    UnionFind uf(totalVerts + vias.size() + padCount + ownNetPositions.size());
+
+    std::vector<std::vector<std::size_t>> trackVertexUf(tracks.size());
+    std::size_t next = 0;
+    for (std::size_t ti = 0; ti < tracks.size(); ++ti) {
+        const auto& verts = tracks[ti]->vertices();
+        trackVertexUf[ti].resize(verts.size());
+        for (std::size_t vi = 0; vi < verts.size(); ++vi) {
+            trackVertexUf[ti][vi] = next++;
+            if (vi > 0) uf.unite(trackVertexUf[ti][vi], trackVertexUf[ti][vi - 1]);
+        }
+    }
+    std::vector<std::size_t> viaUf(vias.size());
+    for (std::size_t i = 0; i < vias.size(); ++i) viaUf[i] = next++;
+
+    std::map<Pos2D, std::vector<std::size_t>> buckets;
+    auto addToBucket = [&](const Point2D& p, std::size_t ufIndex) { buckets[quantizeCoincidence(p)].push_back(ufIndex); };
+    for (std::size_t ti = 0; ti < tracks.size(); ++ti) {
+        const auto& verts = tracks[ti]->vertices();
+        if (verts.empty()) continue;
+        addToBucket(verts.front(), trackVertexUf[ti].front());
+        if (verts.size() > 1) addToBucket(verts.back(), trackVertexUf[ti].back());
+    }
+    for (std::size_t i = 0; i < vias.size(); ++i) addToBucket(vias[i]->position(), viaUf[i]);
+
+    std::vector<std::size_t> padUf;
+    std::vector<Point2D> padPositions;
+    for (const auto* fp : footprints) {
+        for (const auto& padWorld : fp->padWorldPositions()) {
+            const std::size_t ufIndex = next++;
+            addToBucket(padWorld.position, ufIndex);
+            padUf.push_back(ufIndex);
+            padPositions.push_back(padWorld.position);
+        }
+    }
+
+    std::vector<std::size_t> anchorUf(ownNetPositions.size());
+    for (std::size_t i = 0; i < ownNetPositions.size(); ++i) {
+        anchorUf[i] = next++;
+        addToBucket(ownNetPositions[i], anchorUf[i]);
+    }
+
+    for (auto& [key, indices] : buckets) {
+        (void)key;
+        for (std::size_t i = 1; i < indices.size(); ++i) uf.unite(indices[0], indices[i]);
+    }
+
+    std::vector<std::size_t> ownRoots;
+    for (std::size_t a : anchorUf) ownRoots.push_back(uf.find(a));
+    auto isOwnRoot = [&](std::size_t root) {
+        return std::find(ownRoots.begin(), ownRoots.end(), root) != ownRoots.end();
+    };
+
+    result.trackExempt.resize(tracks.size(), false);
+    for (std::size_t ti = 0; ti < tracks.size(); ++ti) {
+        if (!trackVertexUf[ti].empty()) result.trackExempt[ti] = isOwnRoot(uf.find(trackVertexUf[ti].front()));
+    }
+    result.viaExempt.resize(vias.size(), false);
+    for (std::size_t i = 0; i < vias.size(); ++i) result.viaExempt[i] = isOwnRoot(uf.find(viaUf[i]));
+    for (std::size_t i = 0; i < padUf.size(); ++i) {
+        result.padExemptByPosition[quantizeCoincidence(padPositions[i])] = isOwnRoot(uf.find(padUf[i]));
+    }
+
+    return result;
 }
 
 struct Obstacle {
@@ -88,24 +216,29 @@ std::vector<EntityId> buildCopperPourWithClearance(Document& doc, LayerId layer,
     std::vector<EntityId> created;
     if (boundary.size() < 3 || gridSize <= 1e-9) return created;
 
+    const Connectivity connectivity = traceConnectivity(doc, ownNetPositions);
+
     std::vector<Obstacle> pointObstacles;
     std::vector<const TrackEntity*> tracks;
+    std::size_t viaIndex = 0, trackIndex = 0;
     for (const Entity* e : doc.entities()) {
         if (e->type() == EntityType::Via) {
             const auto* via = static_cast<const ViaEntity*>(e);
-            if (!nearExempt(via->position(), ownNetPositions)) {
-                pointObstacles.push_back({via->position(), via->diameter() / 2.0});
-            }
+            const bool exempt = viaIndex < connectivity.viaExempt.size() && connectivity.viaExempt[viaIndex];
+            ++viaIndex;
+            if (!exempt) pointObstacles.push_back({via->position(), via->diameter() / 2.0});
         } else if (e->type() == EntityType::Track) {
             const auto* track = static_cast<const TrackEntity*>(e);
-            const bool exempt = std::any_of(track->vertices().begin(), track->vertices().end(),
-                                            [&](const Point2D& v) { return nearExempt(v, ownNetPositions); });
+            const bool exempt = trackIndex < connectivity.trackExempt.size() && connectivity.trackExempt[trackIndex];
+            ++trackIndex;
             if (!exempt) tracks.push_back(track);
         } else if (e->type() == EntityType::Insert) {
             const auto* insert = static_cast<const InsertEntity*>(e);
             if (!insert->block() || !insert->block()->isFootprint()) continue;
             for (const auto& padWorld : insert->padWorldPositions()) {
-                if (nearExempt(padWorld.position, ownNetPositions)) continue;
+                const auto it = connectivity.padExemptByPosition.find(quantizeCoincidence(padWorld.position));
+                const bool exempt = it != connectivity.padExemptByPosition.end() && it->second;
+                if (exempt) continue;
                 pointObstacles.push_back({padWorld.position, std::max(padWorld.pad->width, padWorld.pad->height) / 2.0});
             }
         }

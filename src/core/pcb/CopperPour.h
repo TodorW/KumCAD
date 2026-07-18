@@ -30,12 +30,13 @@ struct ThermalReliefParams {
 // this codebase has no general 2D polygon-boolean/clipping library, so
 // the boundary is rasterized into a grid of gridSize cells, keeping only
 // cells whose center lands inside the requested boundary AND at least
-// clearance away from every Pad/Track/Via that isn't at one of
-// ownNetPositions (the pour's own net's pad locations -- copper actually
-// AT one of those points is exempt from clearance against itself; copper
-// merely connected further away without a pad exactly there is treated
-// as "other net" too, a real, disclosed limitation of not tracing full
-// electrical connectivity here the way Drc.cpp/Ratsnest.cpp do). This is
+// clearance away from every Pad/Track/Via that isn't electrically
+// connected to one of ownNetPositions (the pour's own net's pad
+// locations). Exemption follows a real union-find connectivity trace
+// over track/via/pad coincidence (the same technique Drc.cpp/Ratsnest.cpp
+// each build their own copy of) -- not just exact coincidence with an
+// ownNetPositions point, so copper reached through a chain of other
+// tracks/vias is correctly treated as this pour's own net too. This is
 // the same "grid/voxel instead of exact computational geometry" call
 // Fem.h's own mesher made, applied to 2D. Adjacent same-row kept cells
 // are merged into wider rectangular HatchEntity pieces rather than one

@@ -1,5 +1,6 @@
 #include "core/document/Document.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Track.h"
 #include "core/geometry/Via.h"
 #include "core/pcb/CopperPour.h"
 
@@ -62,6 +63,44 @@ TEST_CASE("buildCopperPourWithClearance does not exclude cells near an exempt (o
     const auto ids = buildCopperPourWithClearance(doc, layer, boundary, {Point2D(10, 5)}, 0.5, 0.5);
     REQUIRE_FALSE(ids.empty());
     REQUIRE(totalHatchArea(doc) == Approx(20.0 * 10.0).margin(1e-6));
+}
+
+TEST_CASE("buildCopperPourWithClearance exempts a via reached only through a chain of tracks from an "
+         "own-net position, not just one sitting exactly at it",
+         "[pcb][pour]") {
+    Document doc;
+    const LayerId layer = doc.addLayer("F.Cu", Color{200, 100, 0});
+    // Track from the own-net anchor (10,5) out to (10,8), with a via
+    // sitting at the far end -- not at the anchor itself, only connected
+    // to it through this track.
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), layer,
+                                                std::vector<Point2D>{Point2D(10, 5), Point2D(10, 8)}, 0.3));
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), layer, Point2D(10, 8), 1.0, 0.5));
+
+    const std::vector<Point2D> boundary = {{0, 0}, {20, 0}, {20, 16}, {0, 16}};
+    const auto ids = buildCopperPourWithClearance(doc, layer, boundary, {Point2D(10, 5)}, 0.5, 0.5);
+    REQUIRE_FALSE(ids.empty());
+    // Both the connecting track and the far via are on the pour's own net
+    // via the chain, so neither should carve out a clearance gap.
+    REQUIRE(totalHatchArea(doc) == Approx(20.0 * 16.0).margin(1e-6));
+}
+
+TEST_CASE("buildCopperPourWithClearance still excludes a via that isn't connected to any own-net position "
+         "at all",
+         "[pcb][pour]") {
+    Document doc;
+    const LayerId layer = doc.addLayer("F.Cu", Color{200, 100, 0});
+    doc.addEntity(std::make_unique<TrackEntity>(doc.reserveEntityId(), layer,
+                                                std::vector<Point2D>{Point2D(10, 5), Point2D(10, 8)}, 0.3));
+    // A separate, unconnected via well away from that chain.
+    doc.addEntity(std::make_unique<ViaEntity>(doc.reserveEntityId(), layer, Point2D(3, 3), 1.0, 0.5));
+
+    const std::vector<Point2D> boundary = {{0, 0}, {20, 0}, {20, 16}, {0, 16}};
+    const auto ids = buildCopperPourWithClearance(doc, layer, boundary, {Point2D(10, 5)}, 0.5, 0.5);
+    REQUIRE_FALSE(ids.empty());
+    // Proof the trace isn't just exempting every via unconditionally: this
+    // one still carves out a real clearance gap.
+    REQUIRE(totalHatchArea(doc) < 20.0 * 16.0);
 }
 
 TEST_CASE("buildCopperPourWithClearance rejects degenerate input", "[pcb][pour]") {

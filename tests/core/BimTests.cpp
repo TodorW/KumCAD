@@ -310,6 +310,45 @@ TEST_CASE("writeIfcLite/readIfcLite round-trips columns, beams, and spaces", "[c
     REQUIRE(loaded.spaces[0].boundary[2].first == Approx(4000.0));
 }
 
+TEST_CASE("writeIfcLite/readIfcLite round-trips a space name containing an apostrophe",
+         "[core3d][bim]") {
+    // A raw, unescaped apostrophe would prematurely close the IFCSPACE
+    // line's own quoted string (real STEP/IFC syntax) -- writeIfcLite
+    // must escape it ('' , STEP's own convention) and readIfcLite must
+    // find the REAL closing quote, not the first one it sees.
+    TempPath temp;
+    BimModel model;
+    Space space;
+    space.name = "Chef's Kitchen";
+    space.boundary = {{0, 0}, {4000, 0}, {4000, 3000}, {0, 3000}};
+    model.spaces.push_back(space);
+
+    REQUIRE(writeIfcLite(model, temp.path.string()));
+
+    BimModel loaded;
+    REQUIRE(readIfcLite(loaded, temp.path.string()));
+    REQUIRE(loaded.spaces.size() == 1);
+    REQUIRE(loaded.spaces[0].name == "Chef's Kitchen");
+    REQUIRE(loaded.spaces[0].boundary.size() == 4);
+}
+
+TEST_CASE("writeIfcLite/readIfcLite round-trips a space name with multiple consecutive apostrophes",
+         "[core3d][bim]") {
+    TempPath temp;
+    BimModel model;
+    Space space;
+    space.name = "The ''Great Room''";
+    space.boundary = {{0, 0}, {2000, 0}, {2000, 2000}, {0, 2000}};
+    model.spaces.push_back(space);
+
+    REQUIRE(writeIfcLite(model, temp.path.string()));
+
+    BimModel loaded;
+    REQUIRE(readIfcLite(loaded, temp.path.string()));
+    REQUIRE(loaded.spaces.size() == 1);
+    REQUIRE(loaded.spaces[0].name == "The ''Great Room''");
+}
+
 TEST_CASE("buildRoomScheduleTable computes exact area and perimeter for a rectangular space", "[core3d][bim]") {
     BimModel model;
     Space space;

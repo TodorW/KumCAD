@@ -125,6 +125,50 @@ std::vector<double> splitArgs(const std::string& args) {
     return values;
 }
 
+// Real STEP/IFC string-literal escaping (ISO 10303-21's own convention,
+// the same format this file's IFCSPACE line already claims to be a
+// "real subset" of): a literal apostrophe inside a quoted string is
+// written as two apostrophes in a row, not backslash-escaped the way
+// C-family languages do it.
+std::string escapeStepString(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        out += c;
+        if (c == '\'') out += c;
+    }
+    return out;
+}
+
+std::string unescapeStepString(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\'' && i + 1 < s.size() && s[i + 1] == '\'') {
+            out += '\'';
+            ++i;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+// Finds the real closing quote starting the search at start: a lone
+// apostrophe, skipping over any escaped '' pair along the way. Returns
+// std::string::npos if the string never closes.
+std::size_t findClosingQuote(const std::string& s, std::size_t start) {
+    for (std::size_t i = start; i < s.size(); ++i) {
+        if (s[i] != '\'') continue;
+        if (i + 1 < s.size() && s[i + 1] == '\'') {
+            ++i;
+            continue;
+        }
+        return i;
+    }
+    return std::string::npos;
+}
+
 } // namespace
 
 BimShapes buildBimShapes(const BimModel& model) {
@@ -223,11 +267,7 @@ bool writeIfcLite(const BimModel& model, const std::string& path) {
             << beam.elevation << ',' << beam.width << ',' << beam.depth << ");\n";
     }
     for (const Space& space : model.spaces) {
-        // Real, disclosed limitation: the name is written as a bare quoted
-        // string with no escaping -- a name containing an apostrophe would
-        // corrupt this line, same "real subset, not full spec" honesty this
-        // format's own header comment already discloses elsewhere.
-        out << '#' << id++ << "=IFCSPACE('" << space.name << "'," << space.boundary.size();
+        out << '#' << id++ << "=IFCSPACE('" << escapeStepString(space.name) << "'," << space.boundary.size();
         for (const auto& [x, y] : space.boundary) out << ',' << x << ',' << y;
         out << ");\n";
     }
@@ -312,7 +352,7 @@ bool readIfcLite(BimModel& model, const std::string& path) {
         } else if (name == "IFCSPACE") {
             const std::string args = line.substr(open + 1, close - open - 1);
             const auto q1 = args.find('\'');
-            const auto q2 = q1 == std::string::npos ? std::string::npos : args.find('\'', q1 + 1);
+            const auto q2 = q1 == std::string::npos ? std::string::npos : findClosingQuote(args, q1 + 1);
             if (q1 == std::string::npos || q2 == std::string::npos) continue;
             const auto afterQuote = args.find(',', q2);
             if (afterQuote == std::string::npos) continue;
@@ -321,7 +361,7 @@ bool readIfcLite(BimModel& model, const std::string& path) {
             const auto n = static_cast<std::size_t>(spaceValues[0]);
             if (spaceValues.size() != 1 + 2 * n) continue;
             Space space;
-            space.name = args.substr(q1 + 1, q2 - q1 - 1);
+            space.name = unescapeStepString(args.substr(q1 + 1, q2 - q1 - 1));
             for (std::size_t i = 0; i < n; ++i) space.boundary.emplace_back(spaceValues[1 + 2 * i], spaceValues[1 + 2 * i + 1]);
             model.spaces.push_back(space);
         }

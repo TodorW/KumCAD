@@ -483,12 +483,28 @@ std::optional<QString> GerberExportCommand::onText(const QString& text) {
         return QStringLiteral("Enter output file path:");
     }
 
+    if (m_stage == Stage::Path) {
+        m_outputPath = text.trimmed().toStdString();
+        m_stage = Stage::NetlistPath;
+        return QStringLiteral("Netlist file path for %TO.N% net attributes (Enter to skip):");
+    }
+
     m_finished = true;
+    std::vector<lcad::ImportedNet> nets;
+    const std::string netlistPath = text.trimmed().toStdString();
+    if (!netlistPath.empty()) {
+        std::ifstream in(netlistPath, std::ios::binary);
+        if (!in) return QStringLiteral("*Could not open %1*").arg(text.trimmed());
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        nets = lcad::parseNetlist(buffer.str());
+    }
+
     std::string error;
-    if (!lcad::writeGerberLayer(m_document, m_layer, text.trimmed().toStdString(), &error)) {
+    if (!lcad::writeGerberLayer(m_document, m_layer, m_outputPath, &error, nets)) {
         return QStringLiteral("*%1*").arg(QString::fromStdString(error));
     }
-    return QStringLiteral("*Gerber layer written to %1*").arg(text.trimmed());
+    return QStringLiteral("*Gerber layer written to %1*").arg(QString::fromStdString(m_outputPath));
 }
 
 std::optional<QString> DrillExportCommand::onText(const QString& text) {

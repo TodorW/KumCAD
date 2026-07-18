@@ -79,8 +79,11 @@ private:
     bool m_finished = false;
 };
 
-// GERBER: layer name, then output file path -- writes that layer's copper
-// as Gerber (see core/pcb/GerberWriter.h).
+// GERBER: layer name, then output file path, then an optional netlist
+// file path (Enter to skip) -- writes that layer's copper as Gerber (see
+// core/pcb/GerberWriter.h). Providing a netlist resolves each footprint
+// pad's own net and tags its flash with a real %TO.N% object attribute;
+// skipping it writes the file exactly as before (no %TO.N% at all).
 class GerberExportCommand : public DrawCommand {
 public:
     explicit GerberExportCommand(lcad::Document& document) : m_document(document) {}
@@ -96,9 +99,10 @@ public:
     void cancel() override { m_finished = true; }
 
 private:
-    enum class Stage { LayerName, Path };
+    enum class Stage { LayerName, Path, NetlistPath };
     lcad::Document& m_document;
     Stage m_stage = Stage::LayerName;
+    std::string m_outputPath;
     lcad::LayerId m_layer = 0;
     bool m_finished = false;
 };

@@ -88,6 +88,19 @@ std::string isoCreationDate() {
 // CopperPourTests.cpp and friends). Falls back to a generic "Other,User"
 // for a name that doesn't match any of these, a real, disclosed
 // heuristic rather than a stored per-layer role field.
+// Finds the net name for (refDes, pinNumber) among nets' own pins, or
+// nullptr if it isn't in any net -- the same (REFDES, pad number)
+// matching computeRatsnest() (Ratsnest.cpp) already does.
+const std::string* findNetName(const std::vector<ImportedNet>& nets, const std::string& refDes,
+                               const std::string& pinNumber) {
+    for (const ImportedNet& net : nets) {
+        for (const ImportedNetPin& pin : net.pins) {
+            if (pin.refDes == refDes && pin.pinNumber == pinNumber) return &net.name;
+        }
+    }
+    return nullptr;
+}
+
 std::string inferFileFunction(const std::string& layerName) {
     if (layerName == "F.Cu") return "Copper,L1,Top";
     if (layerName == "B.Cu") return "Copper,L2,Bot";
@@ -107,7 +120,8 @@ std::string inferFileFunction(const std::string& layerName) {
 
 } // namespace
 
-bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& path, std::string* errorOut) {
+bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& path, std::string* errorOut,
+                      const std::vector<ImportedNet>& nets) {
     std::vector<const TrackEntity*> tracks;
     std::vector<const ViaEntity*> vias;
     std::vector<const HatchEntity*> pours;
@@ -177,8 +191,12 @@ bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& pat
         const bool haveRefdes = refdes && !refdes->empty();
         if (haveRefdes) out << "%TO.C," << *refdes << "*%\n";
         for (const auto& padWorld : fp->padWorldPositions()) {
+            const std::string* netName =
+                haveRefdes ? findNetName(nets, *refdes, padWorld.pad->number) : nullptr;
+            if (netName) out << "%TO.N," << *netName << "*%\n";
             out << "D" << padAperture[padWorld.pad] << "*\n";
             out << "X" << formatCoord(padWorld.position.x) << "Y" << formatCoord(padWorld.position.y) << "D03*\n";
+            if (netName) out << "%TD.N*%\n";
         }
         if (haveRefdes) out << "%TD*%\n";
     }

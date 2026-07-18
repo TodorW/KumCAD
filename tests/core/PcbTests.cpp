@@ -303,6 +303,70 @@ TEST_CASE("writeGerberLayer wraps each footprint's pad flashes in %TO.C%/%TD*% n
     REQUIRE(flashPos < closePos);
 }
 
+TEST_CASE("writeGerberLayer wraps a resolved pad's flash in %TO.N%/%TD.N% naming its net, without "
+         "disturbing the outer %TO.C% wrap",
+         "[pcb][gerber]") {
+    TempPath temp;
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    ImportedNet net;
+    net.name = "VCC";
+    net.pins = {{"R1", "1"}};
+    const std::vector<ImportedNet> nets = {net};
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string(), nullptr, nets));
+    const std::string text = readFile(temp.path);
+
+    const std::size_t componentOpen = text.find("%TO.C,R1*%");
+    REQUIRE(componentOpen != std::string::npos);
+    const std::size_t netOpen = text.find("%TO.N,VCC*%", componentOpen);
+    REQUIRE(netOpen != std::string::npos);
+    const std::size_t netClose = text.find("%TD.N*%", netOpen);
+    REQUIRE(netClose != std::string::npos);
+    // The outer %TO.C% wrap still closes normally afterward -- %TD.N*%
+    // only cleared the N attribute, not the whole dictionary.
+    REQUIRE(text.find("%TD*%", netClose) != std::string::npos);
+}
+
+TEST_CASE("writeGerberLayer omits %TO.N% for a pad whose (REFDES, pin) isn't in the given nets",
+         "[pcb][gerber]") {
+    TempPath temp;
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    ImportedNet net;
+    net.name = "VCC";
+    net.pins = {{"R2", "1"}}; // a different refdes -- doesn't match any of R1's own pads
+    const std::vector<ImportedNet> nets = {net};
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string(), nullptr, nets));
+    REQUIRE(readFile(temp.path).find("%TO.N,") == std::string::npos);
+}
+
+TEST_CASE("writeGerberLayer with no nets argument writes no %TO.N% attribute at all", "[pcb][gerber]") {
+    TempPath temp;
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string()));
+    REQUIRE(readFile(temp.path).find("%TO.N,") == std::string::npos);
+}
+
 TEST_CASE("writeGerberLayer draws a solid Hatch as a G36/G37 region (a copper pour)", "[pcb][gerber]") {
     TempPath temp;
     Document doc;

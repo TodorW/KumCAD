@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/Ids.h"
+#include "core/pcb/Ratsnest.h"
 
 #include <string>
+#include <vector>
 
 namespace lcad {
 
@@ -24,12 +26,24 @@ class Document;
 // millimeters. Returns false (with *errorOut set, if provided) on a
 // file-open failure.
 //
-// Real, disclosed simplification: no per-net %TO.N% object attribute --
-// that needs the same netlist connectivity computation Ratsnest.h already
-// does, which this function has no access to (it only sees one layer's
-// geometry, not a netlist); %TO.C% (component) is used instead since a
-// footprint's own REFDES is directly available without it.
-bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& path, std::string* errorOut = nullptr);
+// nets (optional, empty by default) resolves each pad's own net by
+// matching (REFDES, pad number) against nets' own pins -- the same
+// netlist connectivity Ratsnest.h's computeRatsnest() already resolves
+// pads through -- and, when found, wraps that pad's flash in a real
+// %TO.N,<netname>*% object attribute (cleared with the single-attribute
+// %TD.N*%, so it doesn't disturb the outer %TO.C% wrap around it). Left
+// empty, no %TO.N% attribute is emitted at all -- the previous behavior,
+// unchanged for every existing caller. A pad whose (REFDES, number) isn't
+// found in nets is simply left without a %TO.N% attribute, the same way
+// a footprint with no REFDES at all skips %TO.C%.
+//
+// Real, disclosed simplification: only pads get %TO.N% -- Track/Via
+// draws and flashes don't carry one, since neither entity has its own
+// net field to resolve without a full geometric connectivity trace (the
+// same "no dedicated net field" limitation Board3D.h's own stackup
+// placement already discloses for pads).
+bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& path, std::string* errorOut = nullptr,
+                      const std::vector<ImportedNet>& nets = {});
 
 // Writes an Excellon drill file (M48 header, one tool per distinct drill
 // diameter among vias and through-hole pads, then per-tool coordinate

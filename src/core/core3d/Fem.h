@@ -122,21 +122,43 @@ std::vector<FemLoad> distributedPressureLoadOnFaces(const FemMesh& mesh, const T
 FemResult solveLinearStatic(const FemMesh& mesh, const FemMaterial& material,
                             const FemBoundaryCondition& boundaryCondition, const std::vector<FemLoad>& loads);
 
-struct FemModalResult {
-    bool solved = false;
-    double angularFrequencySquared = 0.0; // omega^2 of the fundamental mode, in consistent force/length/mass units -- not Hz
+struct FemMode {
+    double angularFrequencySquared = 0.0; // omega^2 of this mode, in consistent force/length/mass units -- not Hz
     std::vector<std::array<double, 3>> modeShape; // parallel to mesh.nodes, mass-normalized (arbitrary overall sign/scale)
 };
 
-// Solves for the structure's fundamental (lowest-frequency) vibration
-// mode via inverse power iteration on the generalized eigenproblem
-// K*phi = omega^2*M*phi -- a real, standard, from-scratch numerical
-// method (the natural next step from solveLinearStatic's own K*u=F,
-// reusing its exact same stiffness assembly and LinearSolve.h dense
-// solver), not a full multi-mode solver: "basic" means exactly one mode,
-// the fundamental one, since finding several needs a substantially
-// heavier algorithm (subspace iteration/Lanczos with deflation) this
-// codebase isn't going to hand-roll on top of an O(n^3) dense solve.
+struct FemModalResult {
+    bool solved = false;
+    // Ascending frequency order, modes[0] is the fundamental mode. Sized
+    // 1 for the (still-default) single-mode call; may come back shorter
+    // than the requested numModes if deflation runs out of usable
+    // freedom first (see solveModal's own comment).
+    std::vector<FemMode> modes;
+    // Mirrors modes[0] exactly -- kept so single-mode callers written
+    // before multi-mode support existed don't need to change.
+    double angularFrequencySquared = 0.0;
+    std::vector<std::array<double, 3>> modeShape;
+};
+
+// Solves for the structure's lowest numModes vibration modes, ascending
+// frequency, via inverse power iteration with mass-orthogonal deflation
+// on the generalized eigenproblem K*phi = omega^2*M*phi -- a real,
+// standard, from-scratch numerical method (the natural next step from
+// solveLinearStatic's own K*u=F, reusing its exact same stiffness
+// assembly and LinearSolve.h dense solver). Each mode after the first
+// reuses the exact same inverse-iteration loop as the fundamental one,
+// just with every iterate's own component along each already-found mode
+// subtracted out (mass-inner-product projection) before renormalizing --
+// deflation, the standard extension of single-vector inverse iteration
+// to several modes, not a fundamentally different algorithm. Real,
+// disclosed limits: still one O(n^3) dense factorization per iteration
+// per mode (not sized for industrial mesh counts, same as
+// solveLinearStatic's own), and deflation's accuracy degrades for
+// closely-spaced eigenvalues (no explicit re-orthogonalization pass
+// beyond the one projection per already-found mode) -- fine for the
+// well-separated low modes a coarse voxel mesh actually resolves
+// meaningfully, not a substitute for a real Lanczos/subspace solver on
+// a large, closely-spaced spectrum.
 //
 // M is a lumped (diagonal) mass matrix built the same way
 // distributedBodyForce distributes a body force -- each tet's
@@ -149,10 +171,15 @@ struct FemModalResult {
 // naturally keeps them at exactly 0 since a fixed DOF's every inverse-
 // iteration right-hand-side entry is mass[dof]*x[dof] = 0.
 //
-// Returns solved=false under the same conditions solveLinearStatic does
-// (no tets, degenerate element, or singular K).
+// Returns solved=false only if the FUNDAMENTAL mode can't be found
+// (same conditions solveLinearStatic fails under: no tets, degenerate
+// element, or singular K). If later modes run out of orthogonal
+// freedom to deflate into (e.g. numModes exceeds the free DOF count),
+// modes simply comes back shorter than requested rather than failing
+// the whole call.
 FemModalResult solveModal(const FemMesh& mesh, const FemMaterial& material,
-                          const FemBoundaryCondition& boundaryCondition, int maxIterations = 150);
+                          const FemBoundaryCondition& boundaryCondition, int maxIterations = 150,
+                          int numModes = 1);
 
 struct FemThermalMaterial {
     double thermalConductivity = 1.0; // consistent power/(length*temperature) units

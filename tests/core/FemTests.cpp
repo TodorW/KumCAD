@@ -400,6 +400,95 @@ TEST_CASE("solveModal's fundamental frequency scales exactly with material stiff
     }
 }
 
+TEST_CASE("solveModal's default single-mode call still populates modes[0] identically to angularFrequencySquared/modeShape",
+         "[core3d][fem][modal]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 10.0).Shape();
+    const FemMesh mesh = buildVoxelMesh(box, 2);
+    FemBoundaryCondition bc;
+    bc.fixedXMax = 1e-6;
+    FemMaterial material;
+
+    const FemModalResult result = solveModal(mesh, material, bc);
+    REQUIRE(result.solved);
+    REQUIRE(result.modes.size() == 1);
+    REQUIRE(result.modes[0].angularFrequencySquared == Approx(result.angularFrequencySquared));
+    REQUIRE(result.modes[0].modeShape.size() == result.modeShape.size());
+    for (std::size_t i = 0; i < result.modeShape.size(); ++i) {
+        REQUIRE(result.modes[0].modeShape[i][0] == Approx(result.modeShape[i][0]));
+        REQUIRE(result.modes[0].modeShape[i][1] == Approx(result.modeShape[i][1]));
+        REQUIRE(result.modes[0].modeShape[i][2] == Approx(result.modeShape[i][2]));
+    }
+}
+
+TEST_CASE("solveModal with numModes=3 finds ascending, mass-orthogonal (deflated) modes", "[core3d][fem][modal]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 10.0, 10.0).Shape();
+    const FemMesh mesh = buildVoxelMesh(box, 2);
+    REQUIRE_FALSE(mesh.tets.empty());
+
+    FemBoundaryCondition bc;
+    bc.fixedXMax = 1e-6;
+    FemMaterial material;
+    material.youngsModulus = 200000.0;
+    material.poissonsRatio = 0.3;
+    material.density = 1.0;
+
+    const FemModalResult result = solveModal(mesh, material, bc, 150, 3);
+    REQUIRE(result.solved);
+    REQUIRE(result.modes.size() == 3);
+
+    // Ascending frequency: each successive mode is the next higher one
+    // deflation converges to, never a repeat of an earlier one.
+    REQUIRE(result.modes[1].angularFrequencySquared >= result.modes[0].angularFrequencySquared);
+    REQUIRE(result.modes[2].angularFrequencySquared >= result.modes[1].angularFrequencySquared);
+    // Genuinely distinct modes, not the same mode found three times.
+    REQUIRE(result.modes[1].angularFrequencySquared > result.modes[0].angularFrequencySquared * 1.0001);
+    REQUIRE(result.modes[2].angularFrequencySquared > result.modes[1].angularFrequencySquared * 1.0001);
+
+    // Every mode shape must still vanish at the fixed nodes.
+    for (const FemMode& mode : result.modes) {
+        for (std::size_t i = 0; i < mesh.nodes.size(); ++i) {
+            if (mesh.nodes[i][0] > bc.fixedXMax) continue;
+            REQUIRE(mode.modeShape[i][0] == Approx(0.0).margin(1e-9));
+            REQUIRE(mode.modeShape[i][1] == Approx(0.0).margin(1e-9));
+            REQUIRE(mode.modeShape[i][2] == Approx(0.0).margin(1e-9));
+        }
+    }
+
+    // The whole point of deflation: each mode must be a genuinely
+    // distinct shape, not the same fundamental mode re-found three
+    // times (which is exactly what plain undeflated inverse iteration
+    // would do). An (unweighted, for simplicity -- the solver's own
+    // orthogonality is against the lumped mass matrix, not this) cosine
+    // similarity well below 1 is strong evidence deflation actually
+    // steered iteration toward a different shape each time.
+    auto dot = [&](const FemMode& a, const FemMode& b) {
+        double sum = 0.0;
+        for (std::size_t n = 0; n < mesh.nodes.size(); ++n) {
+            for (int d = 0; d < 3; ++d) sum += a.modeShape[n][static_cast<std::size_t>(d)] * b.modeShape[n][static_cast<std::size_t>(d)];
+        }
+        return sum;
+    };
+    const double cosine01 = dot(result.modes[0], result.modes[1]) /
+                            std::sqrt(dot(result.modes[0], result.modes[0]) * dot(result.modes[1], result.modes[1]));
+    REQUIRE(std::abs(cosine01) < 0.9);
+}
+
+TEST_CASE("solveModal gracefully returns fewer modes than requested rather than failing", "[core3d][fem][modal]") {
+    // A tiny mesh (divisions=1) has very few free DOFs once one face is
+    // fixed -- asking for far more modes than that should still succeed
+    // with however many independent modes deflation could actually find.
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    const FemMesh mesh = buildVoxelMesh(box, 1);
+    FemBoundaryCondition bc;
+    bc.fixedXMax = 1e-6;
+    FemMaterial material;
+
+    const FemModalResult result = solveModal(mesh, material, bc, 150, 1000);
+    REQUIRE(result.solved);
+    REQUIRE(result.modes.size() >= 1);
+    REQUIRE(result.modes.size() < 1000);
+}
+
 TEST_CASE("solveModal fails cleanly on an empty mesh", "[core3d][fem][modal]") {
     FemMesh empty;
     FemMaterial material;

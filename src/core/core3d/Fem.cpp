@@ -501,9 +501,9 @@ FemResult solveLinearStatic(const FemMesh& mesh, const FemMaterial& material,
 }
 
 FemModalResult solveModal(const FemMesh& mesh, const FemMaterial& material,
-                          const FemBoundaryCondition& boundaryCondition, int maxIterations) {
+                          const FemBoundaryCondition& boundaryCondition, int maxIterations, int numModes) {
     FemModalResult result;
-    if (mesh.tets.empty() || mesh.nodes.empty()) return result;
+    if (mesh.tets.empty() || mesh.nodes.empty() || numModes < 1) return result;
 
     const std::size_t numNodes = mesh.nodes.size();
     const std::size_t numDofs = numNodes * 3;
@@ -544,45 +544,91 @@ FemModalResult solveModal(const FemMesh& mesh, const FemMaterial& material,
         return denominator > 1e-300 ? numerator / denominator : 0.0;
     };
 
-    // Start from 1.0 at every free DOF (0 at fixed ones) -- any vector
-    // with a nonzero component along the true fundamental mode works as
-    // an inverse-iteration seed, and this one has no special symmetry
-    // that would accidentally make it orthogonal to that mode.
-    std::vector<double> x(numDofs, 1.0);
-    for (std::size_t i = 0; i < numDofs; ++i) {
-        if (massDiag[i] <= 0.0) x[i] = 0.0;
+    // Mass-normalized mode shapes found so far (flat per-DOF, one entry
+    // per already-found mode) -- deflate projects each one back out of
+    // every new iterate, so inverse iteration converges to the NEXT
+    // higher mode instead of re-finding an earlier one. Since each
+    // foundFlat entry v satisfies v^T*M*v == 1 by construction, the
+    // mass-inner-product projection coefficient is exactly prev^T*M*w,
+    // no separate normalization needed in the subtraction itself.
+    std::vector<std::vector<double>> foundFlat;
+    auto deflate = [&](std::vector<double>& w) {
+        for (const std::vector<double>& prev : foundFlat) {
+            double c = 0.0;
+            for (std::size_t i = 0; i < numDofs; ++i) c += massDiag[i] * prev[i] * w[i];
+            for (std::size_t i = 0; i < numDofs; ++i) w[i] -= c * prev[i];
+        }
+    };
+
+    for (int mode = 0; mode < numModes; ++mode) {
+        // Start from 1.0 at every free DOF (0 at fixed ones), then
+        // deflated -- any vector with a nonzero component along the true
+        // next mode works as an inverse-iteration seed, and this one has
+        // no special symmetry that would accidentally make it orthogonal
+        // to that mode (or, after deflation, to the space still left).
+        std::vector<double> x(numDofs, 1.0);
+        for (std::size_t i = 0; i < numDofs; ++i) {
+            if (massDiag[i] <= 0.0) x[i] = 0.0;
+        }
+        deflate(x);
+        double norm = massNorm(x);
+        if (norm < 1e-300) {
+            // Every DOF fixed (mode 0), or no freedom left orthogonal to
+            // the modes already found (mode > 0, e.g. numModes exceeds
+            // the free DOF count) -- the latter isn't a failure of the
+            // modes already found, just nothing further to report.
+            if (mode == 0) return result;
+            break;
+        }
+        for (double& v : x) v /= norm;
+
+        double lambda = 0.0;
+        bool hardFailure = false;
+        for (int iter = 0; iter < maxIterations; ++iter) {
+            std::vector<double> rhs(numDofs);
+            for (std::size_t i = 0; i < numDofs; ++i) rhs[i] = massDiag[i] * x[i];
+
+            std::vector<double> y;
+            if (!solveLinearSystem(stiffness, rhs, y)) {
+                hardFailure = true;
+                break;
+            }
+            deflate(y);
+
+            const double newLambda = rayleighQuotient(y, multipliedVec(stiffness, y));
+
+            const double yNorm = massNorm(y);
+            if (yNorm < 1e-300) {
+                hardFailure = true;
+                break;
+            }
+            for (double& v : y) v /= yNorm;
+
+            // Converged once the Rayleigh quotient (the eigenvalue estimate)
+            // stops moving -- inverse power iteration typically settles in a
+            // handful of iterations for a well-separated mode, so this
+            // usually exits long before maxIterations.
+            const bool converged = iter > 0 && std::abs(newLambda - lambda) < 1e-9 * std::max(1.0, std::abs(newLambda));
+            lambda = newLambda;
+            x = y;
+            if (converged) break;
+        }
+
+        if (hardFailure) {
+            if (mode == 0) return result;
+            break;
+        }
+
+        FemMode found;
+        found.angularFrequencySquared = lambda;
+        found.modeShape.resize(numNodes);
+        for (std::size_t n = 0; n < numNodes; ++n) found.modeShape[n] = {x[n * 3 + 0], x[n * 3 + 1], x[n * 3 + 2]};
+        result.modes.push_back(found);
+        foundFlat.push_back(std::move(x));
     }
-    double norm = massNorm(x);
-    if (norm < 1e-300) return result; // every DOF fixed -- nothing to vibrate
-    for (double& v : x) v /= norm;
 
-    double lambda = 0.0;
-    for (int iter = 0; iter < maxIterations; ++iter) {
-        std::vector<double> rhs(numDofs);
-        for (std::size_t i = 0; i < numDofs; ++i) rhs[i] = massDiag[i] * x[i];
-
-        std::vector<double> y;
-        if (!solveLinearSystem(stiffness, rhs, y)) return result;
-
-        const double newLambda = rayleighQuotient(y, multipliedVec(stiffness, y));
-
-        const double yNorm = massNorm(y);
-        if (yNorm < 1e-300) return result;
-        for (double& v : y) v /= yNorm;
-
-        // Converged once the Rayleigh quotient (the eigenvalue estimate)
-        // stops moving -- inverse power iteration typically settles in a
-        // handful of iterations for a well-separated fundamental mode, so
-        // this usually exits long before maxIterations.
-        const bool converged = iter > 0 && std::abs(newLambda - lambda) < 1e-9 * std::max(1.0, std::abs(newLambda));
-        lambda = newLambda;
-        x = y;
-        if (converged) break;
-    }
-
-    result.angularFrequencySquared = lambda;
-    result.modeShape.resize(numNodes);
-    for (std::size_t n = 0; n < numNodes; ++n) result.modeShape[n] = {x[n * 3 + 0], x[n * 3 + 1], x[n * 3 + 2]};
+    result.angularFrequencySquared = result.modes.front().angularFrequencySquared;
+    result.modeShape = result.modes.front().modeShape;
     result.solved = true;
     return result;
 }

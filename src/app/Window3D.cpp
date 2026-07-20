@@ -1147,6 +1147,11 @@ public:
         m_fixedXMax->setValue(0.0);
         form->addRow(QStringLiteral("Fix every node with X <=:"), m_fixedXMax);
 
+        m_numModes = new QSpinBox(this);
+        m_numModes->setRange(1, 10);
+        m_numModes->setValue(1);
+        form->addRow(QStringLiteral("Number of Modes:"), m_numModes);
+
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -1154,6 +1159,7 @@ public:
     }
 
     int divisions() const { return m_divisions->value(); }
+    int numModes() const { return m_numModes->value(); }
 
     lcad::FemMaterial material() const {
         lcad::FemMaterial material;
@@ -1175,6 +1181,7 @@ private:
     QDoubleSpinBox* m_poissonsRatio;
     QDoubleSpinBox* m_density;
     QDoubleSpinBox* m_fixedXMax;
+    QSpinBox* m_numModes;
 };
 
 // FEMTHERMAL: steady-state heat conduction -- a fixed-temperature plane
@@ -2113,7 +2120,8 @@ void Window3D::runFemModalAnalysis() {
         return;
     }
 
-    const lcad::FemModalResult result = lcad::solveModal(mesh, dialog.material(), dialog.boundaryCondition());
+    const lcad::FemModalResult result =
+        lcad::solveModal(mesh, dialog.material(), dialog.boundaryCondition(), 150, dialog.numModes());
     if (!result.solved) {
         QMessageBox::warning(this, QStringLiteral("Analysis Failed"),
                               QStringLiteral("The mode could not be solved -- check that enough nodes are fixed "
@@ -2121,11 +2129,29 @@ void Window3D::runFemModalAnalysis() {
         return;
     }
 
-    const double omega = std::sqrt(std::max(0.0, result.angularFrequencySquared));
-    const double frequencyHz = omega / (2.0 * M_PI);
+    // Deflation can come back with fewer modes than requested (see
+    // solveModal's own comment) -- let the user pick which of whatever
+    // was actually found to visualize, defaulting to the fundamental.
+    int shownMode = 0;
+    if (result.modes.size() > 1) {
+        QStringList modeLabels;
+        for (std::size_t i = 0; i < result.modes.size(); ++i) {
+            const double modeOmega = std::sqrt(std::max(0.0, result.modes[i].angularFrequencySquared));
+            modeLabels << QStringLiteral("Mode %1 (omega^2 = %2, frequency = %3)")
+                              .arg(i + 1)
+                              .arg(result.modes[i].angularFrequencySquared)
+                              .arg(modeOmega / (2.0 * M_PI));
+        }
+        bool ok = false;
+        const QString chosen = QInputDialog::getItem(this, QStringLiteral("Choose Mode to Visualize"),
+                                                      QStringLiteral("Mode:"), modeLabels, 0, false, &ok);
+        if (ok) shownMode = static_cast<int>(modeLabels.indexOf(chosen));
+        if (shownMode < 0) shownMode = 0;
+    }
+    const lcad::FemMode& visualized = result.modes[static_cast<std::size_t>(shownMode)];
 
     double maxAmplitude = 0.0;
-    for (const auto& d : result.modeShape) {
+    for (const auto& d : visualized.modeShape) {
         maxAmplitude = std::max(maxAmplitude, std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]));
     }
 
@@ -2143,7 +2169,7 @@ void Window3D::runFemModalAnalysis() {
         // color per element, since a mode shape carries no stress of its own.
         lcad::FemResult asStaticResult;
         asStaticResult.solved = true;
-        asStaticResult.displacements = result.modeShape;
+        asStaticResult.displacements = visualized.modeShape;
         asStaticResult.vonMisesStress.assign(mesh.tets.size(), 0.0);
 
         const lcad::FemVisualization viz = lcad::buildFemVisualization(mesh, asStaticResult, displacementScale);
@@ -2156,17 +2182,26 @@ void Window3D::runFemModalAnalysis() {
         m_viewport->fitAll();
     }
 
+    QString modeSummary;
+    for (std::size_t i = 0; i < result.modes.size(); ++i) {
+        const double modeOmega = std::sqrt(std::max(0.0, result.modes[i].angularFrequencySquared));
+        modeSummary += QStringLiteral("%1Mode %2: omega^2 = %3, frequency = %4")
+                          .arg(static_cast<int>(i) == shownMode ? QStringLiteral("-> ") : QStringLiteral("   "))
+                          .arg(i + 1)
+                          .arg(result.modes[i].angularFrequencySquared)
+                          .arg(modeOmega / (2.0 * M_PI));
+        if (i + 1 < result.modes.size()) modeSummary += QStringLiteral("\n");
+    }
+
     QMessageBox::information(
         this, QStringLiteral("FEM Modal Analysis Complete"),
-        QStringLiteral("Mesh: %1 nodes, %2 tetrahedra\nFundamental angular frequency^2 (omega^2): %3\n"
-                      "Fundamental frequency: %4 (in consistent force/length/mass units, not necessarily Hz "
-                      "unless your inputs already are)\n\n"
+        QStringLiteral("Mesh: %1 nodes, %2 tetrahedra\n\n%3\n\n(in consistent force/length/mass units, not "
+                      "necessarily Hz unless your inputs already are)\n\n"
                       "Displayed in the viewport as the exaggerated mode shape (not a stress heatmap) -- "
                       "replaces the feature tree's own shapes until you edit/add a feature again.")
             .arg(mesh.nodes.size())
             .arg(mesh.tets.size())
-            .arg(result.angularFrequencySquared)
-            .arg(frequencyHz));
+            .arg(modeSummary));
 }
 
 void Window3D::runFemThermalAnalysis() {

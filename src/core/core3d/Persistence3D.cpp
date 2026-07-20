@@ -51,7 +51,7 @@ std::string decodeToken(const std::string& s) {
 
 std::string serializeDocument(const Document3D& doc) {
     std::ostringstream out;
-    out << "KCAD3D 6\n";
+    out << "KCAD3D 7\n";
 
     // Named document variables (see Document3D::setVariable) arrived in
     // format version 5, alongside per-feature expressions below.
@@ -76,6 +76,23 @@ std::string serializeDocument(const Document3D& doc) {
         out << "CIRCLES " << sketch.circles().size() << "\n";
         for (const SketchCircle& c : sketch.circles()) {
             out << c.center << " " << c.radius << " " << (c.construction ? 1 : 0) << "\n";
+        }
+        // Arcs and splines arrived in format version 7 -- previously
+        // (versions 1-6) SketchArc/SketchSpline were silently never
+        // written at all, a real bug (any sketch with arcs lost them on
+        // every save/reload), not just a disclosed simplification. A
+        // pre-7 file has already lost that data at write time; nothing
+        // to recover, only to stop losing it going forward.
+        out << "ARCS " << sketch.arcs().size() << "\n";
+        for (const SketchArc& a : sketch.arcs()) {
+            out << a.center << " " << a.start << " " << a.end << " " << a.radius << " " << (a.ccw ? 1 : 0) << " "
+                << (a.construction ? 1 : 0) << "\n";
+        }
+        out << "SPLINES " << sketch.splines().size() << "\n";
+        for (const SketchSpline& sp : sketch.splines()) {
+            out << sp.controlPoints.size() << " " << (sp.construction ? 1 : 0);
+            for (int idx : sp.controlPoints) out << " " << idx;
+            out << "\n";
         }
         out << "CONSTRAINTS " << sketch.constraints().size() << "\n";
         for (const SketchConstraint& k : sketch.constraints()) {
@@ -194,6 +211,31 @@ bool parseDocumentText(const std::string& text, ParsedDocument3D& parsed) {
             double radius = 0;
             in >> center >> radius >> construction;
             sketch.addCircle(center, radius, construction != 0);
+        }
+
+        // Arcs and splines arrived in format version 7 -- see the writer's
+        // own comment on ARCS above for why an older file simply has none
+        // rather than needing any special recovery here.
+        if (version >= 7) {
+            if (!expectTag(in, "ARCS")) return false;
+            in >> n;
+            for (std::size_t i = 0; i < n; ++i) {
+                int center = -1, start = -1, end = -1, ccw = 1, construction = 0;
+                double radius = 0;
+                in >> center >> start >> end >> radius >> ccw >> construction;
+                sketch.addArc(center, start, end, radius, ccw != 0, construction != 0);
+            }
+
+            if (!expectTag(in, "SPLINES")) return false;
+            in >> n;
+            for (std::size_t i = 0; i < n; ++i) {
+                std::size_t controlPointCount = 0;
+                int construction = 0;
+                in >> controlPointCount >> construction;
+                std::vector<int> controlPoints(controlPointCount);
+                for (std::size_t c = 0; c < controlPointCount; ++c) in >> controlPoints[c];
+                sketch.addSpline(std::move(controlPoints), construction != 0);
+            }
         }
 
         if (!expectTag(in, "CONSTRAINTS")) return false;

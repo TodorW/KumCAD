@@ -17,10 +17,10 @@
 class SketchView : public QWidget {
     Q_OBJECT
 public:
-    enum class Tool { Select, Line, Circle, Arc };
+    enum class Tool { Select, Line, Circle, Arc, Spline };
 
     struct Selection {
-        enum class Kind { Point, Line, Circle, Arc };
+        enum class Kind { Point, Line, Circle, Arc, Spline };
         Kind kind;
         int index;
     };
@@ -69,6 +69,9 @@ private:
     // session's other "minimal but real" UI passes were scoped).
     std::optional<int> m_pendingArcCenter;
     std::optional<int> m_pendingArcStart;
+    // Spline tool: each click appends one control point (like PLINE); Enter
+    // finishes the spline (needs 2+ points), Escape cancels it entirely.
+    std::vector<int> m_pendingSplinePoints;
     double m_scale = 15.0;
     QPointF m_panOffset{0.0, 0.0};
 };

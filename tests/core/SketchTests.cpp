@@ -590,3 +590,55 @@ TEST_CASE("sketchFillet fails cleanly for parallel lines, oversized radius, or b
     REQUIRE_FALSE(sketchFillet(parallelSketch, pl1, pl2, 1.0));
     REQUIRE(parallelSketch.arcs().empty());
 }
+
+TEST_CASE("Sketch::addSpline stores its control points and returns a growing index", "[sketch][spline]") {
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0));
+    const int p1 = sketch.addPoint(Point2D(5, 5));
+    const int p2 = sketch.addPoint(Point2D(10, 0));
+    const int spline = sketch.addSpline({p0, p1, p2});
+    REQUIRE(spline == 0);
+    REQUIRE(sketch.splines().size() == 1);
+    REQUIRE(sketch.splines()[0].controlPoints == std::vector<int>{p0, p1, p2});
+    REQUIRE_FALSE(sketch.splines()[0].construction);
+}
+
+TEST_CASE("evaluateSketchSpline linearly interpolates between exactly two control points", "[sketch][spline]") {
+    const std::vector<Point2D> ctrl = {Point2D(0, 0), Point2D(10, 20)};
+    REQUIRE(evaluateSketchSpline(ctrl, 0.0).x == Approx(0.0));
+    REQUIRE(evaluateSketchSpline(ctrl, 1.0).x == Approx(10.0));
+    const Point2D mid = evaluateSketchSpline(ctrl, 0.5);
+    REQUIRE(mid.x == Approx(5.0));
+    REQUIRE(mid.y == Approx(10.0));
+}
+
+TEST_CASE("evaluateSketchSpline matches the closed-form quadratic Bezier for exactly three control points",
+         "[sketch][spline]") {
+    const std::vector<Point2D> ctrl = {Point2D(0, 0), Point2D(10, 20), Point2D(20, 0)};
+    // Single-span (no interior knots) degree-2 clamped B-spline through 3
+    // poles is mathematically identical to a quadratic Bezier through the
+    // same 3 points: B(t) = (1-t)^2*P0 + 2t(1-t)*P1 + t^2*P2.
+    for (double t : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+        const double bx = (1 - t) * (1 - t) * ctrl[0].x + 2 * t * (1 - t) * ctrl[1].x + t * t * ctrl[2].x;
+        const double by = (1 - t) * (1 - t) * ctrl[0].y + 2 * t * (1 - t) * ctrl[1].y + t * t * ctrl[2].y;
+        const Point2D got = evaluateSketchSpline(ctrl, t);
+        REQUIRE(got.x == Approx(bx).margin(1e-9));
+        REQUIRE(got.y == Approx(by).margin(1e-9));
+    }
+}
+
+TEST_CASE("evaluateSketchSpline endpoints always match the first/last control points exactly",
+         "[sketch][spline]") {
+    const std::vector<Point2D> ctrl = {Point2D(0, 0), Point2D(3, 8), Point2D(7, -4), Point2D(10, 1), Point2D(15, 6)};
+    REQUIRE(evaluateSketchSpline(ctrl, 0.0).x == Approx(0.0));
+    REQUIRE(evaluateSketchSpline(ctrl, 0.0).y == Approx(0.0));
+    REQUIRE(evaluateSketchSpline(ctrl, 1.0).x == Approx(15.0));
+    REQUIRE(evaluateSketchSpline(ctrl, 1.0).y == Approx(6.0));
+}
+
+TEST_CASE("evaluateSketchSpline degenerates to the single point for fewer than 2 control points",
+         "[sketch][spline]") {
+    REQUIRE(evaluateSketchSpline({}, 0.5).x == Approx(0.0));
+    REQUIRE(evaluateSketchSpline({Point2D(4, 7)}, 0.9).x == Approx(4.0));
+    REQUIRE(evaluateSketchSpline({Point2D(4, 7)}, 0.9).y == Approx(7.0));
+}

@@ -3,8 +3,12 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_TrimmedCurve.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
@@ -53,32 +57,42 @@ double shoelaceSignedArea(const std::vector<Point2D>& pts) {
     return 0.5 * sum;
 }
 
-// One traversal step in a chained loop: a straight edge (arcIndex < 0) or
-// an arc (arcIndex into sketch.arcs()) from p1 to p2 -- p1/p2 may be
-// swapped relative to how the underlying SketchLine/SketchArc stores its
-// own endpoints, tracked via `reversed` so arc sweep direction comes out
-// right when the wire is actually built.
+// One traversal step in a chained loop: a straight edge (arcIndex < 0 and
+// splineIndex < 0), an arc (arcIndex into sketch.arcs()), or a spline
+// (splineIndex into sketch.splines()) from p1 to p2 -- p1/p2 may be
+// swapped relative to how the underlying SketchLine/SketchArc/
+// SketchSpline stores its own endpoints, tracked via `reversed` so arc
+// sweep direction (or spline control-point order) comes out right when
+// the wire is actually built.
 struct ChainEdge {
     int p1 = -1;
     int p2 = -1;
     int arcIndex = -1;
+    int splineIndex = -1;
     bool reversed = false;
 };
 
-// Greedily chains non-construction lines AND arcs into closed point-index
-// loops (mixed line/arc profiles, e.g. a rounded rectangle, chain exactly
-// like an all-line profile since both are just "edges with two point
-// endpoints" to this algorithm). Assumes each point has degree <= 2 in the
-// profile (a simple polygon) -- disclosed in the header.
+// Greedily chains non-construction lines, arcs, AND splines into closed
+// point-index loops (mixed profiles, e.g. a rounded rectangle with one
+// curved side, chain exactly like an all-line profile since all three
+// are just "edges with two point endpoints" to this algorithm -- a
+// spline's own endpoints are its control polygon's first/last entries).
+// Assumes each point has degree <= 2 in the profile (a simple polygon) --
+// disclosed in the header.
 std::vector<std::vector<ChainEdge>> findClosedLoops(const Sketch& sketch) {
     std::vector<ChainEdge> edges;
     for (std::size_t i = 0; i < sketch.lines().size(); ++i) {
         if (sketch.lines()[i].construction) continue;
-        edges.push_back({sketch.lines()[i].p1, sketch.lines()[i].p2, -1, false});
+        edges.push_back({sketch.lines()[i].p1, sketch.lines()[i].p2, -1, -1, false});
     }
     for (std::size_t i = 0; i < sketch.arcs().size(); ++i) {
         if (sketch.arcs()[i].construction) continue;
-        edges.push_back({sketch.arcs()[i].start, sketch.arcs()[i].end, static_cast<int>(i), false});
+        edges.push_back({sketch.arcs()[i].start, sketch.arcs()[i].end, static_cast<int>(i), -1, false});
+    }
+    for (std::size_t i = 0; i < sketch.splines().size(); ++i) {
+        const SketchSpline& spline = sketch.splines()[i];
+        if (spline.construction || spline.controlPoints.size() < 2) continue;
+        edges.push_back({spline.controlPoints.front(), spline.controlPoints.back(), -1, static_cast<int>(i), false});
     }
 
     std::vector<bool> used(edges.size(), false);
@@ -148,6 +162,40 @@ TopoDS_Edge makeArcEdge(const Sketch& sketch, const SketchArc& arc, const ChainE
     return BRepBuilderAPI_MakeEdge(trimmed).Edge();
 }
 
+// Real OCCT edge for a chained spline segment: a clamped, uniform,
+// non-rational Geom_BSplineCurve through the control points, in
+// edge.reversed order -- same degree/knot convention as
+// SketchGeometry.h's own evaluateSketchSpline, so the pure-2D preview
+// used elsewhere (e.g. the sketch editor's on-screen tessellation)
+// traces exactly this curve. Returns a null (empty) edge for fewer than
+// 2 control points, which the caller's wireBuilder.IsDone() check below
+// naturally rejects rather than needing its own guard.
+TopoDS_Edge makeSplineEdge(const Sketch& sketch, const SketchSpline& spline, const ChainEdge& edge) {
+    std::vector<int> ctrl = spline.controlPoints;
+    if (edge.reversed) std::reverse(ctrl.begin(), ctrl.end());
+    const int n = static_cast<int>(ctrl.size());
+    if (n < 2) return TopoDS_Edge();
+
+    const int degree = std::min(3, n - 1);
+    const int numSpans = n - degree;
+
+    TColgp_Array1OfPnt poles(1, n);
+    for (int i = 0; i < n; ++i) {
+        poles.SetValue(i + 1, toGpPnt(sketch.placement(), sketch.points()[static_cast<std::size_t>(ctrl[static_cast<std::size_t>(i)])]));
+    }
+
+    TColStd_Array1OfReal knots(1, numSpans + 1);
+    for (int i = 0; i <= numSpans; ++i) knots.SetValue(i + 1, static_cast<double>(i));
+
+    TColStd_Array1OfInteger mults(1, numSpans + 1);
+    mults.SetValue(1, degree + 1);
+    mults.SetValue(numSpans + 1, degree + 1);
+    for (int i = 2; i <= numSpans; ++i) mults.SetValue(i, 1);
+
+    Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, knots, mults, degree);
+    return BRepBuilderAPI_MakeEdge(curve).Edge();
+}
+
 } // namespace
 
 std::optional<TopoDS_Face> sketchToFace(const Sketch& sketch) {
@@ -160,7 +208,9 @@ std::optional<TopoDS_Face> sketchToFace(const Sketch& sketch) {
 
         BRepBuilderAPI_MakeWire wireBuilder;
         for (const ChainEdge& edge : chain) {
-            if (edge.arcIndex < 0) {
+            if (edge.splineIndex >= 0) {
+                wireBuilder.Add(makeSplineEdge(sketch, sketch.splines()[static_cast<std::size_t>(edge.splineIndex)], edge));
+            } else if (edge.arcIndex < 0) {
                 const Point2D& a = sketch.points()[static_cast<std::size_t>(edge.p1)];
                 const Point2D& b = sketch.points()[static_cast<std::size_t>(edge.p2)];
                 wireBuilder.Add(

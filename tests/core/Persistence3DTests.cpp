@@ -181,6 +181,76 @@ TEST_CASE("Document3D save/load round-trips a sketch and a Pad feature built fro
     REQUIRE(volumeOf(loaded.shapeAt(0)) == Approx(8.0 * 6.0 * 3.0).margin(1e-6));
 }
 
+TEST_CASE("Document3D save/load round-trips a sketch's arcs and splines (previously silently dropped)",
+         "[core3d][persistence][regression]") {
+    // Real bug found and fixed: SketchArc/SketchSpline were never written
+    // by serializeDocument at all (only points/lines/circles/constraints
+    // were) -- any sketch built with the Arc tool, a Sweep path, or
+    // sketchFillet's own arc silently lost that geometry on every save/
+    // reload. This is the regression test for that fix (format 7).
+    TempPath temp;
+    Document3D doc;
+    Sketch sketch;
+    const int center = sketch.addPoint(Point2D(0, 0), true);
+    const int start = sketch.addPoint(Point2D(5, 0));
+    const int end = sketch.addPoint(Point2D(0, 5));
+    sketch.addArc(center, start, end, 5.0, true, true); // construction, so it doesn't need to close a loop
+
+    const int p0 = sketch.addPoint(Point2D(-10, -10), true);
+    const int p1 = sketch.addPoint(Point2D(3, 8));
+    const int p2 = sketch.addPoint(Point2D(6, -2));
+    sketch.addSpline({p0, p1, p2});
+
+    const int sketchIdx = doc.addSketch(sketch);
+    REQUIRE(saveDocument3D(doc, temp.path.string()));
+
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+    REQUIRE(loaded.sketches().size() == 1);
+    const Sketch& roundTripped = loaded.sketches()[static_cast<std::size_t>(sketchIdx)];
+
+    REQUIRE(roundTripped.arcs().size() == 1);
+    REQUIRE(roundTripped.arcs()[0].center == center);
+    REQUIRE(roundTripped.arcs()[0].radius == Approx(5.0));
+    REQUIRE(roundTripped.arcs()[0].ccw);
+    REQUIRE(roundTripped.arcs()[0].construction);
+
+    REQUIRE(roundTripped.splines().size() == 1);
+    REQUIRE(roundTripped.splines()[0].controlPoints == std::vector<int>{p0, p1, p2});
+    REQUIRE_FALSE(roundTripped.splines()[0].construction);
+}
+
+TEST_CASE("Document3D save/load round-trips a Pad built from a spline-bounded profile", "[core3d][persistence]") {
+    TempPath temp;
+    Document3D doc;
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0), true);
+    const int p1 = sketch.addPoint(Point2D(10, 0));
+    const int p2 = sketch.addPoint(Point2D(10, 10));
+    const int p3 = sketch.addPoint(Point2D(0, 10));
+    sketch.addLine(p1, p2);
+    sketch.addLine(p2, p3);
+    sketch.addLine(p3, p0);
+    sketch.addSpline({p0, p1}); // straight 2-point "spline" closes the loop's 4th side
+    const int sketchIdx = doc.addSketch(sketch);
+
+    Feature3D pad;
+    pad.type = FeatureType::Pad;
+    pad.sketchIndex = sketchIdx;
+    pad.p1 = 4.0;
+    doc.addFeature(pad);
+    REQUIRE(doc.isValid(0));
+    const double originalVolume = volumeOf(doc.shapeAt(0));
+
+    REQUIRE(saveDocument3D(doc, temp.path.string()));
+
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+    REQUIRE(loaded.sketches()[0].splines().size() == 1);
+    REQUIRE(loaded.isValid(0));
+    REQUIRE(volumeOf(loaded.shapeAt(0)) == Approx(originalVolume).margin(1e-6));
+}
+
 TEST_CASE("Document3D save/load round-trips an Imported feature's embedded BRep geometry", "[core3d][persistence]") {
     TempPath temp;
     Document3D doc;

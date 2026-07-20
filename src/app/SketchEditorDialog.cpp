@@ -31,6 +31,7 @@ SketchEditorDialog::SketchEditorDialog(lcad::Document3D& document, lcad::SketchP
     toolbar->addAction(QStringLiteral("Line"), this, [this] { m_view->setTool(SketchView::Tool::Line); });
     toolbar->addAction(QStringLiteral("Circle"), this, [this] { m_view->setTool(SketchView::Tool::Circle); });
     toolbar->addAction(QStringLiteral("Arc"), this, [this] { m_view->setTool(SketchView::Tool::Arc); });
+    toolbar->addAction(QStringLiteral("Spline"), this, [this] { m_view->setTool(SketchView::Tool::Spline); });
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Horizontal"), this, &SketchEditorDialog::applyHorizontal);
     toolbar->addAction(QStringLiteral("Vertical"), this, &SketchEditorDialog::applyVertical);
@@ -322,6 +323,9 @@ void SketchEditorDialog::toggleConstruction() {
         } else if (s.kind == Kind::Arc) {
             auto& arc = m_view->sketch().arcs()[static_cast<std::size_t>(s.index)];
             arc.construction = !arc.construction;
+        } else if (s.kind == Kind::Spline) {
+            auto& spline = m_view->sketch().splines()[static_cast<std::size_t>(s.index)];
+            spline.construction = !spline.construction;
         }
     }
     m_view->update();

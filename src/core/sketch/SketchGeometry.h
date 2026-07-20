@@ -86,6 +86,21 @@ struct SketchArc {
     bool construction = false;
 };
 
+// A B-spline defined by its control polygon (real Sketcher-style: the
+// curve interpolates the first and last control point exactly, and is
+// pulled toward but doesn't generally pass through the interior ones) --
+// each entry is a point index just like SketchLine's p1/p2, so a spline's
+// endpoints get the same structural coincidence with a line/arc's own
+// endpoint that any two of those already get with each other. Degree is
+// always min(3, controlPoints.size()-1) with a clamped, uniform,
+// non-rational knot vector (no per-spline degree/weight/knot controls) --
+// the common case real Sketcher splines are used for, not full NURBS
+// editing.
+struct SketchSpline {
+    std::vector<int> controlPoints;
+    bool construction = false;
+};
+
 enum class SketchConstraintType {
     Horizontal,   // geomA (line) is horizontal
     Vertical,     // geomA (line) is vertical
@@ -131,6 +146,7 @@ public:
     int addLine(int p1, int p2, bool construction = false);
     int addCircle(int center, double radius, bool construction = false);
     int addArc(int center, int start, int end, double radius, bool ccw = true, bool construction = false);
+    int addSpline(std::vector<int> controlPoints, bool construction = false);
     void addConstraint(SketchConstraint constraint);
 
     const std::vector<Point2D>& points() const { return m_points; }
@@ -142,6 +158,8 @@ public:
     std::vector<SketchCircle>& circles() { return m_circles; }
     const std::vector<SketchArc>& arcs() const { return m_arcs; }
     std::vector<SketchArc>& arcs() { return m_arcs; }
+    const std::vector<SketchSpline>& splines() const { return m_splines; }
+    std::vector<SketchSpline>& splines() { return m_splines; }
     const std::vector<SketchConstraint>& constraints() const { return m_constraints; }
     std::vector<SketchConstraint>& constraints() { return m_constraints; }
 
@@ -154,9 +172,19 @@ private:
     std::vector<SketchLine> m_lines;
     std::vector<SketchCircle> m_circles;
     std::vector<SketchArc> m_arcs;
+    std::vector<SketchSpline> m_splines;
     std::vector<SketchConstraint> m_constraints;
     SketchPlane m_placement; // defaults to the world XY plane, see SketchPlane's own comment
 };
+
+// Evaluates the point at parameter t in [0,1] along the clamped, uniform,
+// non-rational B-spline through controlPoints -- same degree/knot
+// convention as SketchSpline's own comment, so this pure-2D evaluator
+// (no OCCT dependency, usable by e.g. the sketch editor's own on-screen
+// preview) traces exactly the curve SketchToFace.cpp's real OCCT
+// Geom_BSplineCurve construction builds. t outside [0,1] is clamped;
+// fewer than 2 control points returns the first one (or (0,0) for none).
+Point2D evaluateSketchSpline(const std::vector<Point2D>& controlPoints, double t);
 
 // Real Sketcher's most-used edit tool after drawing lines/circles: trims
 // lineAIndex and lineBIndex back from their corner and inserts a new

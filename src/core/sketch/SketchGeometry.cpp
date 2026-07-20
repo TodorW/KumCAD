@@ -79,6 +79,11 @@ int Sketch::addArc(int center, int start, int end, double radius, bool ccw, bool
     return static_cast<int>(m_arcs.size()) - 1;
 }
 
+int Sketch::addSpline(std::vector<int> controlPoints, bool construction) {
+    m_splines.push_back({std::move(controlPoints), construction});
+    return static_cast<int>(m_splines.size()) - 1;
+}
+
 void Sketch::addConstraint(SketchConstraint constraint) {
     m_constraints.push_back(constraint);
 }
@@ -202,6 +207,60 @@ bool sketchFillet(Sketch& sketch, int lineAIndex, int lineBIndex, double radius)
     else sketch.addArc(centerIndex, nearAIndex, tangentBIndex, radius, true, false);
 
     return true;
+}
+
+Point2D evaluateSketchSpline(const std::vector<Point2D>& controlPoints, double t) {
+    const int n = static_cast<int>(controlPoints.size());
+    if (n == 0) return Point2D();
+    if (n == 1) return controlPoints[0];
+    if (t <= 0.0) return controlPoints.front();
+    if (t >= 1.0) return controlPoints.back(); // sidesteps the zero-width final knot span below
+
+    const int degree = std::min(3, n - 1);
+    const int numSpans = n - degree;
+    const int knotCount = n + degree + 1;
+    std::vector<double> knots(static_cast<std::size_t>(knotCount));
+    for (int i = 0; i < knotCount; ++i) {
+        if (i <= degree) knots[static_cast<std::size_t>(i)] = 0.0;
+        else if (i >= n) knots[static_cast<std::size_t>(i)] = static_cast<double>(numSpans);
+        else knots[static_cast<std::size_t>(i)] = static_cast<double>(i - degree);
+    }
+
+    const double u = t * static_cast<double>(numSpans);
+
+    // Cox-de Boor basis functions, built bottom-up from degree 0 -- each
+    // level p holds N_{i,p}(u) for consecutive i, one shorter than the
+    // level before (degree 0 has knotCount-1 entries, matching the
+    // number of knot spans). Safe against the final zero-width knot span
+    // only because t>=1 is handled above; every remaining span here has
+    // positive width, so the half-open interval test is unambiguous.
+    std::vector<double> basis(static_cast<std::size_t>(knotCount - 1), 0.0);
+    for (int i = 0; i < knotCount - 1; ++i) {
+        if (u >= knots[static_cast<std::size_t>(i)] && u < knots[static_cast<std::size_t>(i + 1)]) {
+            basis[static_cast<std::size_t>(i)] = 1.0;
+        }
+    }
+    for (int p = 1; p <= degree; ++p) {
+        std::vector<double> next(static_cast<std::size_t>(knotCount - 1 - p), 0.0);
+        for (int i = 0; i < knotCount - 1 - p; ++i) {
+            double left = 0.0, right = 0.0;
+            const double denomL = knots[static_cast<std::size_t>(i + p)] - knots[static_cast<std::size_t>(i)];
+            if (denomL > 1e-12) {
+                left = (u - knots[static_cast<std::size_t>(i)]) / denomL * basis[static_cast<std::size_t>(i)];
+            }
+            const double denomR = knots[static_cast<std::size_t>(i + p + 1)] - knots[static_cast<std::size_t>(i + 1)];
+            if (denomR > 1e-12) {
+                right = (knots[static_cast<std::size_t>(i + p + 1)] - u) / denomR * basis[static_cast<std::size_t>(i + 1)];
+            }
+            next[static_cast<std::size_t>(i)] = left + right;
+        }
+        basis = std::move(next);
+    }
+
+    // basis now holds N_{i,degree}(u) for i in [0,n), one per control point.
+    Point2D result(0.0, 0.0);
+    for (int i = 0; i < n; ++i) result = result + controlPoints[static_cast<std::size_t>(i)] * basis[static_cast<std::size_t>(i)];
+    return result;
 }
 
 } // namespace lcad

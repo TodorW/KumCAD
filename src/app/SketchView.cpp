@@ -43,6 +43,7 @@ void SketchView::setTool(Tool tool) {
     m_pendingLineStart.reset();
     m_pendingArcCenter.reset();
     m_pendingArcStart.reset();
+    m_pendingSplinePoints.clear();
 }
 
 void SketchView::clearSelection() {
@@ -122,6 +123,25 @@ std::optional<SketchView::Selection> SketchView::pickEntity(const Point2D& sketc
         while (angle < lo) angle += 2.0 * M_PI;
         if (angle <= hi) return Selection{Selection::Kind::Arc, static_cast<int>(i)};
     }
+    for (std::size_t i = 0; i < m_sketch.splines().size(); ++i) {
+        const auto& spline = m_sketch.splines()[i];
+        if (spline.controlPoints.size() < 2) continue;
+        std::vector<Point2D> ctrl;
+        ctrl.reserve(spline.controlPoints.size());
+        for (int idx : spline.controlPoints) ctrl.push_back(m_sketch.points()[static_cast<std::size_t>(idx)]);
+        constexpr int kSegments = 24;
+        Point2D previous = lcad::evaluateSketchSpline(ctrl, 0.0);
+        for (int s = 1; s <= kSegments; ++s) {
+            const Point2D next = lcad::evaluateSketchSpline(ctrl, static_cast<double>(s) / kSegments);
+            const Point2D dir = next - previous;
+            const double lenSq = dir.dot(dir);
+            double t = lenSq < 1e-12 ? 0.0 : (sketchPos - previous).dot(dir) / lenSq;
+            t = std::clamp(t, 0.0, 1.0);
+            const Point2D closest = previous + dir * t;
+            if (sketchPos.distanceTo(closest) <= tolSketch) return Selection{Selection::Kind::Spline, static_cast<int>(i)};
+            previous = next;
+        }
+    }
     return std::nullopt;
 }
 
@@ -173,6 +193,24 @@ void SketchView::paintEvent(QPaintEvent*) {
         for (int s = 1; s <= kSegments; ++s) {
             const double t = lo + (hi - lo) * (static_cast<double>(s) / kSegments);
             const QPointF next = toScreen(Point2D(center.x + arc.radius * std::cos(t), center.y + arc.radius * std::sin(t)));
+            painter.drawLine(previous, next);
+            previous = next;
+        }
+    }
+
+    for (std::size_t i = 0; i < m_sketch.splines().size(); ++i) {
+        const auto& spline = m_sketch.splines()[i];
+        if (spline.controlPoints.size() < 2) continue;
+        QPen pen(isSelected(Selection::Kind::Spline, static_cast<int>(i)) ? QColor(255, 200, 0) : QColor(255, 150, 220));
+        if (spline.construction) pen.setStyle(Qt::DashLine);
+        painter.setPen(pen);
+        std::vector<Point2D> ctrl;
+        ctrl.reserve(spline.controlPoints.size());
+        for (int idx : spline.controlPoints) ctrl.push_back(m_sketch.points()[static_cast<std::size_t>(idx)]);
+        constexpr int kSegments = 32;
+        QPointF previous = toScreen(lcad::evaluateSketchSpline(ctrl, 0.0));
+        for (int s = 1; s <= kSegments; ++s) {
+            const QPointF next = toScreen(lcad::evaluateSketchSpline(ctrl, static_cast<double>(s) / kSegments));
             painter.drawLine(previous, next);
             previous = next;
         }
@@ -234,6 +272,10 @@ void SketchView::mousePressEvent(QMouseEvent* event) {
             m_pendingArcCenter.reset();
             m_pendingArcStart.reset();
         }
+    } else if (m_tool == Tool::Spline) {
+        m_pendingSplinePoints.push_back(findOrCreatePoint(sketchPos));
+        emit statusMessage(QStringLiteral("Specify next control point (Enter to finish, Escape to cancel) -- %1 so far")
+                               .arg(m_pendingSplinePoints.size()));
     } else {
         const auto picked = pickEntity(sketchPos);
         if (event->modifiers() & Qt::ShiftModifier) {
@@ -254,10 +296,19 @@ void SketchView::wheelEvent(QWheelEvent* event) {
 }
 
 void SketchView::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Escape && (m_pendingLineStart || m_pendingArcCenter || m_pendingArcStart)) {
+    const bool anyPending =
+        m_pendingLineStart || m_pendingArcCenter || m_pendingArcStart || !m_pendingSplinePoints.empty();
+    if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && m_tool == Tool::Spline &&
+        m_pendingSplinePoints.size() >= 2) {
+        m_sketch.addSpline(m_pendingSplinePoints);
+        m_pendingSplinePoints.clear();
+        resolve();
+        emit statusMessage(QStringLiteral("Spline added"));
+    } else if (event->key() == Qt::Key_Escape && anyPending) {
         m_pendingLineStart.reset();
         m_pendingArcCenter.reset();
         m_pendingArcStart.reset();
+        m_pendingSplinePoints.clear();
         emit statusMessage(QStringLiteral("Ready"));
     } else {
         QWidget::keyPressEvent(event);

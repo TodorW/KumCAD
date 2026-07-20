@@ -107,3 +107,53 @@ TEST_CASE("sketchToFace builds a face from a mixed line+arc profile (a stadium/c
     const double expected = length * (2.0 * radius) + M_PI * radius * radius;
     REQUIRE(props.Mass() == Approx(expected).margin(1e-3));
 }
+
+TEST_CASE("sketchToFace builds a face from a profile with one spline side that is collinear (an exact line)",
+         "[core3d][sketchtoface][spline]") {
+    // A B-spline curve always stays within its own control polygon's
+    // convex hull; for perfectly collinear control points that hull IS
+    // the segment between the endpoints, so the curve must trace exactly
+    // that segment -- letting this reuse makeRectangle's own exact-area
+    // expectation as a strong correctness check on the real OCCT curve
+    // construction, not just a "did it build something" smoke test.
+    Sketch sketch = makeRectangle(20.0, 10.0);
+    // Replace the bottom line (p0->p1) with a spline through 4 collinear
+    // points along the same segment.
+    sketch.lines()[0].construction = true; // stop the original straight bottom from also bounding the loop
+    const int p0 = sketch.lines()[0].p1;
+    const int p1 = sketch.lines()[0].p2;
+    const int mid1 = sketch.addPoint(Point2D(6.0, 0.0));
+    const int mid2 = sketch.addPoint(Point2D(13.0, 0.0));
+    sketch.addSpline({p0, mid1, mid2, p1});
+
+    const auto face = sketchToFace(sketch);
+    REQUIRE(face.has_value());
+
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(*face, props);
+    REQUIRE(props.Mass() == Approx(200.0).margin(1e-6));
+}
+
+TEST_CASE("sketchToFace ignores a construction spline", "[core3d][sketchtoface][spline]") {
+    Sketch sketch = makeRectangle(20.0, 10.0);
+    const int p0 = sketch.addPoint(Point2D(5, 5), true);
+    const int p1 = sketch.addPoint(Point2D(15, 5));
+    sketch.addSpline({p0, p1}, true); // construction: shouldn't affect the face at all
+
+    const auto face = sketchToFace(sketch);
+    REQUIRE(face.has_value());
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(*face, props);
+    REQUIRE(props.Mass() == Approx(200.0).margin(1e-6));
+}
+
+TEST_CASE("sketchToFace returns nullopt for a lone open spline (not closed into a loop)",
+         "[core3d][sketchtoface][spline]") {
+    Sketch sketch;
+    const int p0 = sketch.addPoint(Point2D(0, 0), true);
+    const int p1 = sketch.addPoint(Point2D(5, 5));
+    const int p2 = sketch.addPoint(Point2D(10, 0));
+    sketch.addSpline({p0, p1, p2});
+
+    REQUIRE_FALSE(sketchToFace(sketch).has_value());
+}

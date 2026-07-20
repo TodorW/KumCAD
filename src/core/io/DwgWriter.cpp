@@ -410,7 +410,7 @@ bool writeDwg(const Document& document, const std::string& path, std::string* er
         return false;
     }
 
-    DwgExport exporter{document, dwg};
+    DwgExport exporter{.doc = document, .dwg = dwg, .mspace = nullptr, .layerHandles = {}, .skipped = 0};
     exporter.addLayers();
 
     Dwg_Object* mspaceObj = dwg_model_space_object(&dwg);

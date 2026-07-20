@@ -121,6 +121,31 @@ TEST_CASE("solveSketch satisfies Parallel and Perpendicular constraints", "[sket
     REQUIRE(dot == Approx(0.0).margin(1e-6));
 }
 
+TEST_CASE("solveSketch satisfies DistanceX and DistanceY independently of the diagonal distance",
+         "[sketch][solver]") {
+    Sketch sketch;
+    const int a = sketch.addPoint(Point2D(0, 0), true);
+    const int b = sketch.addPoint(Point2D(3, 1)); // free, starts far from the target offsets
+    sketch.addConstraint({SketchConstraintType::DistanceX, -1, -1, a, b, 12.0});
+    sketch.addConstraint({SketchConstraintType::DistanceY, -1, -1, a, b, 5.0});
+
+    REQUIRE(solveSketch(sketch).converged);
+    const Point2D pa = sketch.points()[static_cast<std::size_t>(a)];
+    const Point2D pb = sketch.points()[static_cast<std::size_t>(b)];
+    REQUIRE((pb.x - pa.x) == Approx(12.0).margin(1e-6));
+    REQUIRE((pb.y - pa.y) == Approx(5.0).margin(1e-6));
+}
+
+TEST_CASE("solveSketch dimensions a circle's diameter directly", "[sketch][solver]") {
+    Sketch sketch;
+    const int center = sketch.addPoint(Point2D(5, 5), true);
+    const int circle = sketch.addCircle(center, 2.0); // starts at radius 2
+    sketch.addConstraint({SketchConstraintType::Diameter, circle, -1, -1, -1, 15.0});
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.circles()[static_cast<std::size_t>(circle)].radius == Approx(7.5).margin(1e-6));
+}
+
 TEST_CASE("solveSketch satisfies an Equal-length constraint between two lines", "[sketch][solver]") {
     Sketch sketch;
     const int a1 = sketch.addPoint(Point2D(0, 0), true);
@@ -135,6 +160,37 @@ TEST_CASE("solveSketch satisfies an Equal-length constraint between two lines", 
     const double lenA = sketch.points()[static_cast<std::size_t>(a1)].distanceTo(sketch.points()[static_cast<std::size_t>(a2)]);
     const double lenB = sketch.points()[static_cast<std::size_t>(b1)].distanceTo(sketch.points()[static_cast<std::size_t>(b2)]);
     REQUIRE(lenB == Approx(lenA).margin(1e-6));
+}
+
+TEST_CASE("solveSketch satisfies EqualCircleRadius between two circles", "[sketch][solver]") {
+    Sketch sketch;
+    const int centerA = sketch.addPoint(Point2D(0, 0), true);
+    const int centerB = sketch.addPoint(Point2D(20, 0), true);
+    const int circleA = sketch.addCircle(centerA, 5.0);
+    const int circleB = sketch.addCircle(centerB, 2.0); // starts unequal
+    sketch.addConstraint({SketchConstraintType::EqualCircleRadius, circleA, circleB});
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.circles()[static_cast<std::size_t>(circleA)].radius ==
+            Approx(sketch.circles()[static_cast<std::size_t>(circleB)].radius).margin(1e-6));
+}
+
+TEST_CASE("solveSketch satisfies EqualArcRadius between two arcs", "[sketch][solver][arc]") {
+    Sketch sketch;
+    const int centerA = sketch.addPoint(Point2D(0, 0), true);
+    const int startA = sketch.addPoint(Point2D(5, 0), true);
+    const int endA = sketch.addPoint(Point2D(0, 5), true);
+    const int arcA = sketch.addArc(centerA, startA, endA, 5.0);
+
+    const int centerB = sketch.addPoint(Point2D(20, 0), true);
+    const int startB = sketch.addPoint(Point2D(22, 0)); // radius 2 initially, free to move
+    const int endB = sketch.addPoint(Point2D(20, 2));
+    const int arcB = sketch.addArc(centerB, startB, endB, 2.0);
+
+    sketch.addConstraint({SketchConstraintType::EqualArcRadius, arcA, arcB});
+
+    REQUIRE(solveSketch(sketch).converged);
+    REQUIRE(sketch.arcs()[static_cast<std::size_t>(arcB)].radius == Approx(5.0).margin(1e-6));
 }
 
 TEST_CASE("solveSketch satisfies a Tangent constraint between a line and a circle", "[sketch][solver]") {
@@ -444,4 +500,93 @@ TEST_CASE("SketchPlane angle rotates the local X axis within the plane", "[sketc
     const Point3D y = rotated.yAxis();
     REQUIRE(y.x == Approx(-1.0));
     REQUIRE(y.y == Approx(0.0).margin(1e-9));
+}
+
+namespace {
+double distanceToInfiniteLine(const Point2D& p1, const Point2D& p2, const Point2D& c) {
+    const Point2D dir = p2 - p1;
+    const double len = dir.length();
+    return std::abs(dir.x * (c.y - p1.y) - dir.y * (c.x - p1.x)) / len;
+}
+} // namespace
+
+TEST_CASE("sketchFillet rounds a right-angle corner shared structurally by two lines", "[sketch][fillet]") {
+    Sketch sketch;
+    const int corner = sketch.addPoint(Point2D(0, 0));
+    const int farA = sketch.addPoint(Point2D(10, 0));
+    const int farB = sketch.addPoint(Point2D(0, 10));
+    const int lineA = sketch.addLine(farA, corner); // corner is lineA.p2
+    const int lineB = sketch.addLine(corner, farB); // corner is lineB.p1
+
+    REQUIRE(sketchFillet(sketch, lineA, lineB, 2.0));
+    REQUIRE(sketch.arcs().size() == 1);
+
+    const SketchArc& arc = sketch.arcs()[0];
+    REQUIRE(arc.radius == Approx(2.0));
+    const Point2D center = sketch.points()[static_cast<std::size_t>(arc.center)];
+    const Point2D start = sketch.points()[static_cast<std::size_t>(arc.start)];
+    const Point2D end = sketch.points()[static_cast<std::size_t>(arc.end)];
+    REQUIRE(center.distanceTo(start) == Approx(2.0).margin(1e-6));
+    REQUIRE(center.distanceTo(end) == Approx(2.0).margin(1e-6));
+
+    // The lines' new near-endpoints must coincide with the arc's own
+    // start/end -- structural coincidence, not just numeric proximity.
+    const SketchLine& lA = sketch.lines()[static_cast<std::size_t>(lineA)];
+    const SketchLine& lB = sketch.lines()[static_cast<std::size_t>(lineB)];
+    REQUIRE((lA.p2 == arc.start || lA.p2 == arc.end));
+    REQUIRE((lB.p1 == arc.start || lB.p1 == arc.end));
+    REQUIRE(lA.p2 != lB.p1); // the shared vertex was split, not reused by both
+
+    // The arc must be tangent to both (untouched, far-side) line directions.
+    const Point2D farAPos = sketch.points()[static_cast<std::size_t>(farA)];
+    const Point2D farBPos = sketch.points()[static_cast<std::size_t>(farB)];
+    const Point2D nearAPos = sketch.points()[static_cast<std::size_t>(lA.p2)];
+    const Point2D nearBPos = sketch.points()[static_cast<std::size_t>(lB.p1)];
+    REQUIRE(distanceToInfiniteLine(farAPos, nearAPos, center) == Approx(2.0).margin(1e-6));
+    REQUIRE(distanceToInfiniteLine(farBPos, nearBPos, center) == Approx(2.0).margin(1e-6));
+}
+
+TEST_CASE("sketchFillet rounds a corner between two lines that only meet when extended", "[sketch][fillet]") {
+    Sketch sketch;
+    // Two collinear-ish but offset lines whose infinite extensions meet at (10,10),
+    // not sharing any point index.
+    const int a1 = sketch.addPoint(Point2D(0, 0));
+    const int a2 = sketch.addPoint(Point2D(8, 0));
+    const int b1 = sketch.addPoint(Point2D(10, 2));
+    const int b2 = sketch.addPoint(Point2D(10, 10));
+    const int lineA = sketch.addLine(a1, a2);
+    const int lineB = sketch.addLine(b1, b2);
+
+    REQUIRE(sketchFillet(sketch, lineA, lineB, 1.5));
+    REQUIRE(sketch.arcs().size() == 1);
+    const SketchArc& arc = sketch.arcs()[0];
+    REQUIRE(arc.radius == Approx(1.5));
+    // No new points needed when there's no shared vertex to split.
+    REQUIRE(sketch.points().size() == 4 /* original */ + 1 /* arc center */);
+}
+
+TEST_CASE("sketchFillet fails cleanly for parallel lines, oversized radius, or bad indices",
+         "[sketch][fillet]") {
+    Sketch sketch;
+    const int corner = sketch.addPoint(Point2D(0, 0));
+    const int farA = sketch.addPoint(Point2D(10, 0));
+    const int farB = sketch.addPoint(Point2D(0, 10));
+    const int lineA = sketch.addLine(farA, corner);
+    const int lineB = sketch.addLine(corner, farB);
+
+    REQUIRE_FALSE(sketchFillet(sketch, lineA, lineB, 0.0));   // non-positive radius
+    REQUIRE_FALSE(sketchFillet(sketch, lineA, lineB, 100.0)); // too large to fit
+    REQUIRE_FALSE(sketchFillet(sketch, lineA, lineA, 1.0));   // same line twice
+    REQUIRE_FALSE(sketchFillet(sketch, lineA, 99, 1.0));      // out-of-range index
+    REQUIRE(sketch.arcs().empty());
+
+    Sketch parallelSketch;
+    const int p1 = parallelSketch.addPoint(Point2D(0, 0));
+    const int p2 = parallelSketch.addPoint(Point2D(10, 0));
+    const int p3 = parallelSketch.addPoint(Point2D(0, 5));
+    const int p4 = parallelSketch.addPoint(Point2D(10, 5));
+    const int pl1 = parallelSketch.addLine(p1, p2);
+    const int pl2 = parallelSketch.addLine(p3, p4);
+    REQUIRE_FALSE(sketchFillet(parallelSketch, pl1, pl2, 1.0));
+    REQUIRE(parallelSketch.arcs().empty());
 }

@@ -37,10 +37,14 @@ SketchEditorDialog::SketchEditorDialog(lcad::Document3D& document, lcad::SketchP
     toolbar->addAction(QStringLiteral("Parallel"), this, &SketchEditorDialog::applyParallel);
     toolbar->addAction(QStringLiteral("Perpendicular"), this, &SketchEditorDialog::applyPerpendicular);
     toolbar->addAction(QStringLiteral("Equal"), this, &SketchEditorDialog::applyEqual);
+    toolbar->addAction(QStringLiteral("Fillet..."), this, &SketchEditorDialog::applyFillet);
     toolbar->addAction(QStringLiteral("Tangent"), this, &SketchEditorDialog::applyTangent);
     toolbar->addAction(QStringLiteral("Circle-Circle Tangent"), this, &SketchEditorDialog::applyCircleCircleTangent);
     toolbar->addAction(QStringLiteral("Distance..."), this, &SketchEditorDialog::applyDistance);
+    toolbar->addAction(QStringLiteral("Distance X..."), this, &SketchEditorDialog::applyDistanceX);
+    toolbar->addAction(QStringLiteral("Distance Y..."), this, &SketchEditorDialog::applyDistanceY);
     toolbar->addAction(QStringLiteral("Radius..."), this, &SketchEditorDialog::applyRadius);
+    toolbar->addAction(QStringLiteral("Diameter..."), this, &SketchEditorDialog::applyDiameter);
     toolbar->addAction(QStringLiteral("Arc Radius..."), this, &SketchEditorDialog::applyArcRadius);
     toolbar->addAction(QStringLiteral("Angle..."), this, &SketchEditorDialog::applyAngle);
     toolbar->addAction(QStringLiteral("Point On Line"), this, &SketchEditorDialog::applyPointOnLine);
@@ -199,10 +203,42 @@ void SketchEditorDialog::applyPerpendicular() {
 }
 
 void SketchEditorDialog::applyEqual() {
+    // Mirrors real Sketcher's single "Equal" tool: line pairs get equal
+    // length, circle pairs and arc pairs get equal radius -- which
+    // interpretation applies is read off the current selection's kind
+    // rather than needing separate tools per geometry type.
+    const auto& sel = m_view->selection();
+    if (sel.size() == 2 && sel[0].kind == Kind::Circle && sel[1].kind == Kind::Circle) {
+        m_view->sketch().addConstraint({SketchConstraintType::EqualCircleRadius, sel[0].index, sel[1].index});
+        m_view->resolve();
+        return;
+    }
+    if (sel.size() == 2 && sel[0].kind == Kind::Arc && sel[1].kind == Kind::Arc) {
+        m_view->sketch().addConstraint({SketchConstraintType::EqualArcRadius, sel[0].index, sel[1].index});
+        m_view->resolve();
+        return;
+    }
     const auto lines = twoSelectedLines();
     if (!lines) return;
     m_view->sketch().addConstraint({SketchConstraintType::Equal, lines->first, lines->second});
     m_view->resolve();
+}
+
+void SketchEditorDialog::applyFillet() {
+    const auto lines = twoSelectedLines();
+    if (!lines) return;
+    bool ok = false;
+    const double radius = QInputDialog::getDouble(this, QStringLiteral("Fillet"), QStringLiteral("Radius:"), 2.0,
+                                                   0.001, 1e6, 3, &ok);
+    if (!ok) return;
+    if (lcad::sketchFillet(m_view->sketch(), lines->first, lines->second, radius)) {
+        m_view->clearSelection();
+        m_view->resolve();
+        m_statusLabel->setText(QStringLiteral("Filleted with radius %1").arg(radius));
+    } else {
+        m_statusLabel->setText(QStringLiteral("*Could not fillet -- lines may be parallel/collinear or "
+                                              "the radius too large*"));
+    }
 }
 
 void SketchEditorDialog::applyTangent() {
@@ -228,6 +264,38 @@ void SketchEditorDialog::applyDistance() {
     if (!ok) return;
     SketchConstraint c;
     c.type = SketchConstraintType::Distance;
+    c.pointA = points->first;
+    c.pointB = points->second;
+    c.value = value;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyDistanceX() {
+    const auto points = twoPointsForDistance();
+    if (!points) return;
+    bool ok = false;
+    const double value = QInputDialog::getDouble(this, QStringLiteral("Distance X"), QStringLiteral("Value:"), 10.0,
+                                                  -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::DistanceX;
+    c.pointA = points->first;
+    c.pointB = points->second;
+    c.value = value;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyDistanceY() {
+    const auto points = twoPointsForDistance();
+    if (!points) return;
+    bool ok = false;
+    const double value = QInputDialog::getDouble(this, QStringLiteral("Distance Y"), QStringLiteral("Value:"), 10.0,
+                                                  -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::DistanceY;
     c.pointA = points->first;
     c.pointB = points->second;
     c.value = value;
@@ -268,6 +336,21 @@ void SketchEditorDialog::applyRadius() {
     if (!ok) return;
     SketchConstraint c;
     c.type = SketchConstraintType::Radius;
+    c.geomA = *circle;
+    c.value = value;
+    m_view->sketch().addConstraint(c);
+    m_view->resolve();
+}
+
+void SketchEditorDialog::applyDiameter() {
+    const auto circle = oneSelectedCircle();
+    if (!circle) return;
+    bool ok = false;
+    const double value = QInputDialog::getDouble(this, QStringLiteral("Diameter"), QStringLiteral("Value:"), 20.0,
+                                                  0.0, 1e6, 3, &ok);
+    if (!ok) return;
+    SketchConstraint c;
+    c.type = SketchConstraintType::Diameter;
     c.geomA = *circle;
     c.value = value;
     m_view->sketch().addConstraint(c);

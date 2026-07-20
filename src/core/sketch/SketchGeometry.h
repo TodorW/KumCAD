@@ -90,12 +90,17 @@ enum class SketchConstraintType {
     Horizontal,   // geomA (line) is horizontal
     Vertical,     // geomA (line) is vertical
     Distance,     // |points[pointA] - points[pointB]| == value -- also how a sketch dimension is represented
+    DistanceX,    // (points[pointB].x - points[pointA].x) == value -- horizontal-only distance dimension
+    DistanceY,    // (points[pointB].y - points[pointA].y) == value -- vertical-only distance dimension
     Parallel,     // geomA, geomB (lines) have parallel directions
     Perpendicular, // geomA, geomB (lines) have perpendicular directions
     Equal,        // geomA, geomB (lines) have equal length
+    EqualCircleRadius, // geomA, geomB (circles) have equal radius -- Equal's circle counterpart
+    EqualArcRadius,    // geomA, geomB (arcs) have equal radius -- Equal's arc counterpart
     Tangent,      // geomA (line) is tangent to geomB (circle)
     Radius,       // geomA (circle) has radius == value -- how a circle gets dimensioned
     ArcRadius,    // geomA (arc) has radius == value -- how an arc gets dimensioned
+    Diameter,     // geomA (circle) has 2*radius == value -- alternative to Radius for diameter-style dimensioning
     TangentCircleCircle, // geomA, geomB (circles) are externally tangent (distance(centers) == rA + rB) --
                          // internal tangency (one circle inside the other) isn't covered, a disclosed gap
     Angle,        // angle between geomA, geomB (lines) == value radians -- a general-purpose version of
@@ -152,5 +157,31 @@ private:
     std::vector<SketchConstraint> m_constraints;
     SketchPlane m_placement; // defaults to the world XY plane, see SketchPlane's own comment
 };
+
+// Real Sketcher's most-used edit tool after drawing lines/circles: trims
+// lineAIndex and lineBIndex back from their corner and inserts a new
+// tangent arc of the given radius between them -- a one-time geometric
+// edit (like the AutoCAD-style 2D FILLET command), not a persisting
+// solver constraint the way SketchConstraintType's entries are, so
+// nothing keeps the result tangent if the lines are dragged afterward
+// (matching FILLET's own honestly-scoped behavior).
+//
+// The two lines' corner is either an existing point they already share
+// structurally (the common case -- see SketchLine's own "coincidence is
+// structural" comment), in which case that shared point is reused as one
+// line's new tangent-point endpoint and a new point is added for the
+// other; or, if they don't share a point, the corner is the intersection
+// of their infinite extensions, and each line's own nearer endpoint is
+// moved in place to its tangent point. Either way a new free (unfixed)
+// center point and a new SketchArc tangent to both lines are added,
+// sharing point indices with each line's new corner-adjacent endpoint
+// the same structural way any other coincident geometry does.
+//
+// Returns false (sketch unchanged) if either index is out of range, the
+// two lines are the same line, they're parallel/collinear (no corner to
+// round), or radius is non-positive or too large to fit between the
+// corner and either line's far endpoint -- the same failure cases
+// FILLET's own 2D command reports.
+bool sketchFillet(Sketch& sketch, int lineAIndex, int lineBIndex, double radius);
 
 } // namespace lcad

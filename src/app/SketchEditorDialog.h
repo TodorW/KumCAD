@@ -43,9 +43,13 @@ private:
     void applyParallel();
     void applyPerpendicular();
     void applyEqual();
+    void applyFillet();
     void applyTangent();
     void applyDistance();
+    void applyDistanceX();
+    void applyDistanceY();
     void applyRadius();
+    void applyDiameter();
     void applyArcRadius();
     void applyCircleCircleTangent();
     void toggleConstruction();

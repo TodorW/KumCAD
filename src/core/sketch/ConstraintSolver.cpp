@@ -148,6 +148,18 @@ std::vector<double> computeResidual(const Sketch& sketch, const VariableMap& var
             r.push_back(a.distanceTo(b) - c.value);
             break;
         }
+        case SketchConstraintType::DistanceX: {
+            const Point2D a = pointAt(sketch, vars, c.pointA, x);
+            const Point2D b = pointAt(sketch, vars, c.pointB, x);
+            r.push_back((b.x - a.x) - c.value);
+            break;
+        }
+        case SketchConstraintType::DistanceY: {
+            const Point2D a = pointAt(sketch, vars, c.pointA, x);
+            const Point2D b = pointAt(sketch, vars, c.pointB, x);
+            r.push_back((b.y - a.y) - c.value);
+            break;
+        }
         case SketchConstraintType::Parallel: {
             const SketchLine& la = sketch.lines()[static_cast<std::size_t>(c.geomA)];
             const SketchLine& lb = sketch.lines()[static_cast<std::size_t>(c.geomB)];
@@ -174,8 +186,20 @@ std::vector<double> computeResidual(const Sketch& sketch, const VariableMap& var
             r.push_back(a1.distanceTo(a2) - b1.distanceTo(b2));
             break;
         }
+        case SketchConstraintType::EqualCircleRadius: {
+            r.push_back(radiusAt(sketch, vars, c.geomA, x) - radiusAt(sketch, vars, c.geomB, x));
+            break;
+        }
+        case SketchConstraintType::EqualArcRadius: {
+            r.push_back(arcRadiusAt(sketch, vars, c.geomA, x) - arcRadiusAt(sketch, vars, c.geomB, x));
+            break;
+        }
         case SketchConstraintType::Radius: {
             r.push_back(radiusAt(sketch, vars, c.geomA, x) - c.value);
+            break;
+        }
+        case SketchConstraintType::Diameter: {
+            r.push_back(2.0 * radiusAt(sketch, vars, c.geomA, x) - c.value);
             break;
         }
         case SketchConstraintType::Tangent: {

@@ -10,14 +10,16 @@ namespace lcad {
 
 Document::Document() {
     // Layer "0" is always present, mirroring AutoCAD's default layer.
-    m_layers.push_back(Layer{0, "0", Color{255, 255, 255}, LineType::Continuous, true, false});
+    m_layers.push_back(Layer{.id = 0, .name = "0", .color = Color{255, 255, 255}, .linetype = LineType::Continuous,
+                              .visible = true, .locked = false, .frozen = false, .lineweight = 0.25, .plotStyle = ""});
     m_nextLayerId = 1;
     m_currentLayer = 0;
 }
 
 LayerId Document::addLayer(const std::string& name, Color color) {
     const LayerId id = m_nextLayerId++;
-    m_layers.push_back(Layer{id, name, color, LineType::Continuous, true, false});
+    m_layers.push_back(Layer{.id = id, .name = name, .color = color, .linetype = LineType::Continuous,
+                              .visible = true, .locked = false, .frozen = false, .lineweight = 0.25, .plotStyle = ""});
     return id;
 }
 

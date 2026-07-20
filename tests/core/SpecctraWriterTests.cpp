@@ -73,6 +73,77 @@ TEST_CASE("writeSpecctraDsn emits a well-formed DSN with placement, library, and
     REQUIRE(depth == 0);
 }
 
+TEST_CASE("writeSpecctraDsn writes back-side footprints as \"back\" and everything else \"front\"",
+         "[pcb][dsn]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    REQUIRE(rfp);
+
+    const LayerId frontCu = doc.addLayer("F.Cu", Color{200, 100, 0});
+    const LayerId backCu = doc.addLayer("B.Cu", Color{0, 100, 200});
+
+    auto insertFront = std::make_unique<InsertEntity>(doc.reserveEntityId(), frontCu, rfp, Point2D(0, 0));
+    insertFront->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insertFront));
+    auto insertBack = std::make_unique<InsertEntity>(doc.reserveEntityId(), backCu, rfp, Point2D(50, 0));
+    insertBack->setAttribute("REFDES", "R2");
+    doc.addEntity(std::move(insertBack));
+
+    ImportedNet net;
+    net.name = "Net1";
+    net.pins = {{"R1", "2"}, {"R2", "1"}};
+
+    TempPath temp;
+    std::string error;
+    REQUIRE(writeSpecctraDsn(doc, {net}, temp.path.string(), &error));
+
+    const std::string content = readFile(temp.path);
+    // Each component's own (place ...) line carries its own R1/R2
+    // designator directly next to the front/back token, so a substring
+    // check on the whole line is enough to associate them correctly.
+    std::istringstream lines(content);
+    std::string line;
+    bool r1Checked = false, r2Checked = false;
+    while (std::getline(lines, line)) {
+        if (line.find("(place R1 ") != std::string::npos) {
+            REQUIRE(line.find(" front ") != std::string::npos);
+            REQUIRE(line.find(" back ") == std::string::npos);
+            r1Checked = true;
+        }
+        if (line.find("(place R2 ") != std::string::npos) {
+            REQUIRE(line.find(" back ") != std::string::npos);
+            r2Checked = true;
+        }
+    }
+    REQUIRE(r1Checked);
+    REQUIRE(r2Checked);
+}
+
+TEST_CASE("writeSpecctraDsn writes every footprint as \"front\" when the document has no B.Cu layer",
+         "[pcb][dsn]") {
+    Document doc;
+    registerBuiltinSymbols(doc);
+    const BlockDefinition* rfp = doc.findBlock("R_FP");
+    REQUIRE(rfp);
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), rfp, Point2D(0, 0));
+    insert->setAttribute("REFDES", "R1");
+    doc.addEntity(std::move(insert));
+
+    ImportedNet net;
+    net.name = "Net1";
+    net.pins = {{"R1", "2"}};
+
+    TempPath temp;
+    std::string error;
+    REQUIRE(writeSpecctraDsn(doc, {net}, temp.path.string(), &error));
+
+    const std::string content = readFile(temp.path);
+    REQUIRE(content.find(" front ") != std::string::npos);
+    REQUIRE(content.find(" back ") == std::string::npos);
+}
+
 TEST_CASE("writeSpecctraDsn reuses one image per distinct footprint across multiple placements", "[pcb][dsn]") {
     Document doc;
     registerBuiltinSymbols(doc);

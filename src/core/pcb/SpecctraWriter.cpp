@@ -47,6 +47,19 @@ bool writeSpecctraDsn(const Document& doc, const std::vector<ImportedNet>& nets,
         return false;
     }
 
+    // A footprint placed on the document's own "B.Cu" layer is back-
+    // side; everything else (F.Cu, or any document with no such layer
+    // at all) is front -- see this function's own header comment.
+    LayerId backLayer = 0;
+    bool hasBackLayer = false;
+    for (const Layer& layer : doc.layers()) {
+        if (layer.name == "B.Cu") {
+            backLayer = layer.id;
+            hasBackLayer = true;
+            break;
+        }
+    }
+
     std::ofstream out(path, std::ios::trunc);
     if (!out) {
         if (errorOut) *errorOut = "Could not open " + path + " for writing";
@@ -109,8 +122,9 @@ bool writeSpecctraDsn(const Document& doc, const std::vector<ImportedNet>& nets,
             const std::string* refdes = insert->attributeValue("REFDES");
             const std::string designator = refdes && !refdes->empty() ? *refdes : ("U" + std::to_string(insert->id()));
             const double rotationDeg = insert->rotation() * 180.0 / M_PI;
+            const bool isBack = hasBackLayer && insert->layer() == backLayer;
             out << "      (place " << sanitizeName(designator) << " " << (insert->position().x * kUmPerUnit) << " "
-                << (insert->position().y * kUmPerUnit) << " front " << rotationDeg << ")\n";
+                << (insert->position().y * kUmPerUnit) << (isBack ? " back " : " front ") << rotationDeg << ")\n";
         }
         out << "    )\n";
     }

@@ -880,6 +880,124 @@ TEST_CASE("Document3D Fillet recovers the intended edge via fingerprint even wit
     REQUIRE(volumeOf(doc.shapeAt(staleIdx)) == Approx(correctVolume).margin(1e-6));
 }
 
+TEST_CASE("Document3D attachSketchToFace pads a boss exactly on top of the picked face",
+          "[core3d][sketch][attachment]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+    REQUIRE(doc.isValid(boxIdx));
+
+    PickRay ray;
+    ray.origin = {10.0, 10.0, 30.0}; // straight above the box's center
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto hit = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(hit.has_value());
+    REQUIRE(hit->point[2] == Approx(20.0)); // must have hit the top face
+
+    const int sketchIdx = doc.addSketch(makeRectangleSketch(4.0, 4.0));
+    REQUIRE(doc.attachSketchToFace(sketchIdx, boxIdx, hit->faceIndex));
+    REQUIRE(doc.sketches()[static_cast<std::size_t>(sketchIdx)].isAttached());
+
+    Feature3D pad;
+    pad.type = FeatureType::Pad;
+    pad.sketchIndex = sketchIdx;
+    pad.p1 = 3.0;
+    pad.dirX = 0.0;
+    pad.dirY = 0.0;
+    pad.dirZ = 1.0; // the top face's own outward normal
+    const int padIdx = doc.addFeature(pad);
+
+    REQUIRE(doc.isValid(padIdx));
+    const TopoDS_Shape& shape = doc.shapeAt(padIdx);
+    REQUIRE(volumeOf(shape) == Approx(4.0 * 4.0 * 3.0).margin(1e-6));
+
+    Bnd_Box bnd;
+    BRepBndLib::Add(shape, bnd);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bnd.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmin == Approx(20.0)); // sits exactly on the box's own top face, not the world origin
+    REQUIRE((zmax - zmin) == Approx(3.0));
+}
+
+TEST_CASE("Document3D attachSketchToFace rejects an out-of-range sketch/feature/face or a curved face",
+          "[core3d][sketch][attachment]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+    const int sketchIdx = doc.addSketch(makeRectangleSketch(2.0, 2.0));
+
+    REQUIRE_FALSE(doc.attachSketchToFace(999, boxIdx, 0));
+    REQUIRE_FALSE(doc.attachSketchToFace(sketchIdx, 999, 0));
+    REQUIRE_FALSE(doc.attachSketchToFace(sketchIdx, boxIdx, 999));
+    REQUIRE_FALSE(doc.sketches()[static_cast<std::size_t>(sketchIdx)].isAttached());
+}
+
+TEST_CASE("An attached sketch tracks its host face's own current geometry across a later edit",
+          "[core3d][sketch][attachment][toponaming]") {
+    // The re-resolution promise: resolveSketchAttachment re-derives the
+    // plane from the host feature's CURRENT shape every time the
+    // consuming feature recomputes, not just once at attach time -- the
+    // same topo-naming-mitigation spirit Fillet/Chamfer/Shell already
+    // get for edgeIndices/faceIndices -- and the same real, disclosed
+    // "nearest geometric match" limitation: a MODERATE height change
+    // still resolves correctly (checked here), but an extreme enough
+    // change can move the true face's centroid closer to a DIFFERENT
+    // face's stale-fingerprint distance than to its own, the same
+    // "two similar candidates" mis-resolution risk TopoNaming.h's own
+    // comment already discloses for edges. Sketches aren't in the
+    // feature dependency graph (see Document3D::addSketch's own
+    // comment), so editing the box alone doesn't auto-recompute the
+    // Pad; re-touching the Pad itself (as any editor UI naturally
+    // would after a base feature changes) picks up the box's new
+    // height correctly.
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    PickRay ray;
+    ray.origin = {10.0, 10.0, 30.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto hit = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(hit.has_value());
+
+    const int sketchIdx = doc.addSketch(makeRectangleSketch(4.0, 4.0));
+    REQUIRE(doc.attachSketchToFace(sketchIdx, boxIdx, hit->faceIndex));
+
+    Feature3D pad;
+    pad.type = FeatureType::Pad;
+    pad.sketchIndex = sketchIdx;
+    pad.p1 = 3.0;
+    pad.dirZ = 1.0;
+    const int padIdx = doc.addFeature(pad);
+    REQUIRE(doc.isValid(padIdx));
+
+    Bnd_Box before;
+    BRepBndLib::Add(doc.shapeAt(padIdx), before);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    before.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmin == Approx(20.0));
+
+    Feature3D tallerBox = *doc.findFeature(boxIdx);
+    tallerBox.p3 = 24.0;
+    doc.updateFeature(boxIdx, tallerBox);
+    REQUIRE(doc.shapeAt(boxIdx).IsNull() == false);
+
+    // Re-touch the Pad to pick up the box's new top face.
+    doc.updateFeature(padIdx, *doc.findFeature(padIdx));
+    REQUIRE(doc.isValid(padIdx));
+
+    Bnd_Box after;
+    BRepBndLib::Add(doc.shapeAt(padIdx), after);
+    after.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmin == Approx(24.0)); // followed the box's own new top face, not stuck at the old Z=20
+}
+
 TEST_CASE("Document3D Fillet with no fingerprints falls back to trusting the raw index directly (old-format compat)",
           "[core3d][fillet][toponaming]") {
     Document3D doc;

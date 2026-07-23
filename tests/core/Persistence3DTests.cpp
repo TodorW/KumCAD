@@ -5,7 +5,9 @@
 #include "core/io/Zip.h"
 #include "core/sketch/SketchGeometry.h"
 
+#include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
+#include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 
 #include <catch2/catch_approx.hpp>
@@ -218,6 +220,123 @@ TEST_CASE("Document3D save/load round-trips a sketch's arcs and splines (previou
     REQUIRE(roundTripped.splines().size() == 1);
     REQUIRE(roundTripped.splines()[0].controlPoints == std::vector<int>{p0, p1, p2});
     REQUIRE_FALSE(roundTripped.splines()[0].construction);
+}
+
+TEST_CASE("Document3D save/load round-trips a sketch's own plane placement (previously silently dropped)",
+          "[core3d][persistence][regression]") {
+    // Real bug found and fixed: Sketch::placement (world XY plane, XZ/YZ,
+    // or any custom offset/rotated plane -- see SketchPlane's own
+    // comment) was never written by serializeDocument at all, only ever
+    // implicitly the default. Any sketch NOT on the default world XY
+    // plane -- a sketch drawn via SketchPlane::XZ/YZ, or attached to a
+    // face -- silently reverted to it on save/reload, corrupting every
+    // Pad/Revolve built from it. This is the regression test for that
+    // fix (format 8).
+    TempPath temp;
+    Document3D doc;
+    Sketch sketch = makeRectangleSketch(6.0, 4.0);
+    sketch.setPlacement(SketchPlane::YZ(12.0)); // offset 12 along world X
+    const int sketchIdx = doc.addSketch(sketch);
+
+    Feature3D pad;
+    pad.type = FeatureType::Pad;
+    pad.sketchIndex = sketchIdx;
+    pad.p1 = 2.0;
+    pad.dirX = 1.0;
+    pad.dirY = 0.0;
+    pad.dirZ = 0.0;
+    const int padIdx = doc.addFeature(pad);
+    REQUIRE(doc.isValid(padIdx));
+    const double originalVolume = volumeOf(doc.shapeAt(padIdx));
+
+    REQUIRE(saveDocument3D(doc, temp.path.string()));
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+
+    const Sketch& roundTripped = loaded.sketches()[static_cast<std::size_t>(sketchIdx)];
+    REQUIRE(roundTripped.placement().origin.x == Approx(12.0));
+    REQUIRE(roundTripped.placement().normal.x == Approx(1.0));
+
+    REQUIRE(loaded.isValid(padIdx));
+    REQUIRE(volumeOf(loaded.shapeAt(padIdx)) == Approx(originalVolume).margin(1e-6));
+    Bnd_Box bnd;
+    BRepBndLib::Add(loaded.shapeAt(padIdx), bnd);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bnd.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(xmin == Approx(12.0)); // NOT reverted to the default world-XY plane at the origin
+}
+
+TEST_CASE("Document3D save/load round-trips a face-attached sketch and keeps riding its host face",
+          "[core3d][persistence][attachment]") {
+    TempPath temp;
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    PickRay ray;
+    ray.origin = {10.0, 10.0, 30.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto hit = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(hit.has_value());
+
+    const int sketchIdx = doc.addSketch(makeRectangleSketch(4.0, 4.0));
+    REQUIRE(doc.attachSketchToFace(sketchIdx, boxIdx, hit->faceIndex));
+
+    Feature3D pad;
+    pad.type = FeatureType::Pad;
+    pad.sketchIndex = sketchIdx;
+    pad.p1 = 3.0;
+    pad.dirZ = 1.0;
+    const int padIdx = doc.addFeature(pad);
+    REQUIRE(doc.isValid(padIdx));
+
+    REQUIRE(saveDocument3D(doc, temp.path.string()));
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+
+    const Sketch& roundTripped = loaded.sketches()[static_cast<std::size_t>(sketchIdx)];
+    REQUIRE(roundTripped.isAttached());
+    REQUIRE(roundTripped.attachedFeature == boxIdx);
+
+    REQUIRE(loaded.isValid(padIdx));
+    Bnd_Box bnd;
+    BRepBndLib::Add(loaded.shapeAt(padIdx), bnd);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bnd.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmin == Approx(20.0)); // still riding the box's top face after a full save/reload
+}
+
+TEST_CASE("loadDocument3D reads an older format-7 file (no placement/attachment) with sane defaults",
+          "[core3d][persistence][regression]") {
+    TempPath temp;
+    const std::string oldFormatText =
+        "KCAD3D 7\n"
+        "VARIABLES 0\n"
+        "SKETCHES 1\n"
+        "SKETCH\n"
+        "POINTS 2\n"
+        "0 0 1\n"
+        "10 0 0\n"
+        "LINES 1\n"
+        "0 1 0\n"
+        "CIRCLES 0\n"
+        "ARCS 0\n"
+        "SPLINES 0\n"
+        "CONSTRAINTS 0\n"
+        "ENDSKETCH\n"
+        "FEATURES 0\n"
+        "IMPORTEDSHAPES 0\n";
+    REQUIRE(writeZip(temp.path.string(), {{"document.txt", oldFormatText}}));
+
+    Document3D loaded;
+    REQUIRE(loadDocument3D(loaded, temp.path.string()));
+    REQUIRE(loaded.sketches().size() == 1);
+    const Sketch& sketch = loaded.sketches()[0];
+    REQUIRE_FALSE(sketch.isAttached());
+    REQUIRE(sketch.placement().origin.x == Approx(0.0)); // defaults to the world XY plane, unchanged behavior
+    REQUIRE(sketch.placement().normal.z == Approx(1.0));
 }
 
 TEST_CASE("Document3D save/load round-trips a Pad built from a spline-bounded profile", "[core3d][persistence]") {

@@ -114,3 +114,42 @@ TEST_CASE("resolveEdgeIndex on an edgeless shape returns -1", "[core3d][toponami
     REQUIRE(resolveEdgeIndex(empty, EdgeFingerprint{}) == -1);
     REQUIRE(resolveFaceIndex(empty, FaceFingerprint{}) == -1);
 }
+
+TEST_CASE("planeFromFace builds a sketch plane matching a box face's own outward normal",
+          "[core3d][toponaming][attachment]") {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 4.0, 6.0).Shape();
+    // A box has 6 planar faces; each of the 6 world axis directions
+    // (+-X, +-Y, +-Z) must show up as SOME face's outward normal.
+    bool sawPlusZ = false;
+    for (int i = 0; i < 6; ++i) {
+        const auto plane = planeFromFace(box, i);
+        REQUIRE(plane.has_value());
+        // xAxis and normal must stay unit-length and mutually
+        // perpendicular -- a real orthonormal frame, not just copied
+        // fields.
+        const double xLen = std::sqrt(plane->xAxis.x * plane->xAxis.x + plane->xAxis.y * plane->xAxis.y +
+                                       plane->xAxis.z * plane->xAxis.z);
+        REQUIRE(xLen == Approx(1.0).margin(1e-6));
+        const double dot = plane->normal.x * plane->xAxis.x + plane->normal.y * plane->xAxis.y +
+                            plane->normal.z * plane->xAxis.z;
+        REQUIRE(dot == Approx(0.0).margin(1e-6));
+        if (plane->normal.z > 0.99) sawPlusZ = true;
+    }
+    REQUIRE(sawPlusZ);
+}
+
+TEST_CASE("planeFromFace returns nullopt for a curved face and an out-of-range index",
+          "[core3d][toponaming][attachment]") {
+    const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(5.0, 10.0).Shape();
+    // A cylinder's 3 faces are top disc, bottom disc (both planar), and
+    // the curved side wall (not planar) -- at least one must reject.
+    bool sawRejection = false;
+    for (int i = 0; i < 3; ++i) {
+        if (!planeFromFace(cylinder, i).has_value()) sawRejection = true;
+    }
+    REQUIRE(sawRejection);
+
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    REQUIRE_FALSE(planeFromFace(box, -1).has_value());
+    REQUIRE_FALSE(planeFromFace(box, 999).has_value());
+}

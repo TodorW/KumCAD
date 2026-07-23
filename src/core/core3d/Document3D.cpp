@@ -322,6 +322,45 @@ int Document3D::addSketch(Sketch sketch) {
     return static_cast<int>(m_sketches.size()) - 1;
 }
 
+bool Document3D::attachSketchToFace(int sketchIndex, int featureIndex, int faceIndex) {
+    if (sketchIndex < 0 || sketchIndex >= static_cast<int>(m_sketches.size())) return false;
+    if (featureIndex < 0 || featureIndex >= static_cast<int>(m_features.size()) || !isValid(featureIndex)) {
+        return false;
+    }
+
+    const TopoDS_Shape& hostShape = m_shapes[static_cast<std::size_t>(featureIndex)];
+    const auto fp = fingerprintFace(hostShape, faceIndex);
+    const auto plane = planeFromFace(hostShape, faceIndex);
+    if (!fp || !plane) return false;
+
+    Sketch& sketch = m_sketches[static_cast<std::size_t>(sketchIndex)];
+    sketch.attachedFeature = featureIndex;
+    sketch.attachedFace = faceIndex;
+    sketch.attachedFaceFingerprint = *fp;
+    sketch.setPlacement(*plane);
+
+    // Sketches aren't in the feature dependency graph (see addSketch's own
+    // comment) -- recompute everything, the same brute-force approach
+    // setVariable already uses for the same reason.
+    for (std::size_t i = 0; i < m_features.size(); ++i) recomputeOne(static_cast<int>(i));
+    return true;
+}
+
+void Document3D::resolveSketchAttachment(int sketchIndex) {
+    if (sketchIndex < 0 || sketchIndex >= static_cast<int>(m_sketches.size())) return;
+    Sketch& sketch = m_sketches[static_cast<std::size_t>(sketchIndex)];
+    if (!sketch.isAttached()) return;
+    if (!isValid(sketch.attachedFeature)) return;
+
+    const TopoDS_Shape& hostShape = m_shapes[static_cast<std::size_t>(sketch.attachedFeature)];
+    const int resolved = resolveFaceIndex(hostShape, sketch.attachedFaceFingerprint);
+    if (resolved < 0) return;
+    const auto plane = planeFromFace(hostShape, resolved);
+    if (!plane) return;
+    sketch.attachedFace = resolved;
+    sketch.setPlacement(*plane);
+}
+
 int Document3D::addImportedShape(TopoDS_Shape shape) {
     m_importedShapes.push_back(std::move(shape));
     return static_cast<int>(m_importedShapes.size()) - 1;
@@ -411,6 +450,7 @@ void Document3D::recomputeOne(int index) {
             ok = false;
             break;
         }
+        resolveSketchAttachment(f.sketchIndex);
         const auto face = sketchToFace(m_sketches[static_cast<std::size_t>(f.sketchIndex)]);
         if (!face) {
             ok = false;
@@ -595,6 +635,7 @@ void Document3D::recomputeOne(int index) {
                 everyProfileValid = false;
                 break;
             }
+            resolveSketchAttachment(sketchIdx);
             const auto face = sketchToFace(m_sketches[static_cast<std::size_t>(sketchIdx)]);
             if (!face) {
                 everyProfileValid = false;
@@ -624,6 +665,8 @@ void Document3D::recomputeOne(int index) {
             ok = false;
             break;
         }
+        resolveSketchAttachment(f.sketchIndex);
+        resolveSketchAttachment(f.pathSketchIndex);
         const auto profileFace = sketchToFace(m_sketches[static_cast<std::size_t>(f.sketchIndex)]);
         const Sketch& pathSketch = m_sketches[static_cast<std::size_t>(f.pathSketchIndex)];
         if (!profileFace) {

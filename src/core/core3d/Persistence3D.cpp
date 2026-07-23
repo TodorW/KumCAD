@@ -51,7 +51,7 @@ std::string decodeToken(const std::string& s) {
 
 std::string serializeDocument(const Document3D& doc) {
     std::ostringstream out;
-    out << "KCAD3D 7\n";
+    out << "KCAD3D 8\n";
 
     // Named document variables (see Document3D::setVariable) arrived in
     // format version 5, alongside per-feature expressions below.
@@ -99,6 +99,21 @@ std::string serializeDocument(const Document3D& doc) {
             out << static_cast<int>(k.type) << " " << k.geomA << " " << k.geomB << " " << k.pointA << " "
                 << k.pointB << " " << k.value << "\n";
         }
+        // Plane placement and face attachment arrived in format version 8
+        // -- previously (versions 1-7) a sketch's own placement (world XY
+        // plane, XZ/YZ, or any custom offset/rotated plane -- see
+        // SketchPlane's own comment) was never written at all, a real bug
+        // (any sketch not on the default world XY plane silently reverted
+        // to it on save/reload, corrupting every Pad/Revolve built from
+        // it), not just a disclosed simplification -- the same class of
+        // bug arcs/splines had before format version 7.
+        const SketchPlane& pl = sketch.placement();
+        out << "PLACEMENT " << pl.origin.x << " " << pl.origin.y << " " << pl.origin.z << " " << pl.normal.x << " "
+            << pl.normal.y << " " << pl.normal.z << " " << pl.xAxis.x << " " << pl.xAxis.y << " " << pl.xAxis.z
+            << "\n";
+        out << "ATTACHMENT " << sketch.attachedFeature << " " << sketch.attachedFace << " "
+            << sketch.attachedFaceFingerprint.centroidX << " " << sketch.attachedFaceFingerprint.centroidY << " "
+            << sketch.attachedFaceFingerprint.centroidZ << " " << sketch.attachedFaceFingerprint.area << "\n";
         out << "ENDSKETCH\n";
     }
 
@@ -252,6 +267,26 @@ bool parseDocumentText(const std::string& text, ParsedDocument3D& parsed) {
             k.pointB = pointB;
             k.value = value;
             sketch.addConstraint(k);
+        }
+
+        // Plane placement and face attachment arrived in format version 8
+        // -- see the writer's own comment on PLACEMENT above. An older
+        // file has no attachment (no earlier format could have created
+        // one) and no stored placement, so the default world-XY plane
+        // (SketchPlane's own default) is exactly right for it -- unlike
+        // arcs/splines, there's no separate recovery step needed here,
+        // just nothing further to read.
+        if (version >= 8) {
+            if (!expectTag(in, "PLACEMENT")) return false;
+            SketchPlane pl;
+            in >> pl.origin.x >> pl.origin.y >> pl.origin.z >> pl.normal.x >> pl.normal.y >> pl.normal.z >>
+                pl.xAxis.x >> pl.xAxis.y >> pl.xAxis.z;
+            sketch.setPlacement(pl);
+
+            if (!expectTag(in, "ATTACHMENT")) return false;
+            in >> sketch.attachedFeature >> sketch.attachedFace >> sketch.attachedFaceFingerprint.centroidX >>
+                sketch.attachedFaceFingerprint.centroidY >> sketch.attachedFaceFingerprint.centroidZ >>
+                sketch.attachedFaceFingerprint.area;
         }
 
         if (!expectTag(in, "ENDSKETCH")) return false;

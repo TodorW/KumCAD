@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/core3d/Fingerprint.h"
+#include "core/sketch/SketchGeometry.h"
 
 #include <TopoDS_Shape.hxx>
 
@@ -43,5 +44,18 @@ std::optional<FaceFingerprint> fingerprintFace(const TopoDS_Shape& shape, int in
 // Returns -1 only if shape has no edges/faces at all.
 int resolveEdgeIndex(const TopoDS_Shape& shape, const EdgeFingerprint& target);
 int resolveFaceIndex(const TopoDS_Shape& shape, const FaceFingerprint& target);
+
+// Builds a sketch plane sitting exactly on the planar face at index (same
+// numbering as fingerprintFace/pickFace). origin/xAxis come straight from
+// the face's own underlying gp_Pln position (OCCT's own canonical in-plane
+// reference frame for a planar surface, not an arbitrary/rotating choice),
+// so re-attaching to "the same" face after a rebuild reproduces the same
+// in-plane axes. normal is flipped for a TopAbs_REVERSED face so it always
+// points away from the solid's own material, matching pickFace's own
+// outward-normal convention. Returns nullopt if index is out of range or
+// the face isn't planar (BRepAdaptor_Surface's GeomAbs_Plane check) -- a
+// real, disclosed limitation: only flat faces can host a sketch plane,
+// the same restriction FreeCAD's own simple face attachment has.
+std::optional<SketchPlane> planeFromFace(const TopoDS_Shape& shape, int index);
 
 } // namespace lcad

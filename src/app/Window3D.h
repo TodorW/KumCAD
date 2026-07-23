@@ -32,6 +32,12 @@ private:
     // faceIndices (see Pick3D.h's pickFace numbering).
     void listSelectedFeatureFaces();
     void openSketchEditor();
+    // Real "sketch on a face" attachment (see Document3D::attachSketchToFace):
+    // prompts for the host feature's face index (same numbering as
+    // listSelectedFeatureFaces' own report), opens the sketch editor
+    // already sitting on that face's plane, then attaches the finished
+    // sketch to it so later recomputes keep tracking that face.
+    void openSketchOnFace();
     void addSketchFeature();
     void openVariablesDialog();
     void openLisp3DConsole();

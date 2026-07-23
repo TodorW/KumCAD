@@ -1,6 +1,7 @@
 #include "core/core3d/TopoNaming.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
@@ -8,6 +9,8 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 
 #include <cmath>
@@ -87,6 +90,29 @@ int resolveFaceIndex(const TopoDS_Shape& shape, const FaceFingerprint& target) {
         }
     }
     return best;
+}
+
+std::optional<SketchPlane> planeFromFace(const TopoDS_Shape& shape, int index) {
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+    if (index < 0 || index >= faceMap.Extent()) return std::nullopt;
+
+    const TopoDS_Face face = TopoDS::Face(faceMap(index + 1));
+    BRepAdaptor_Surface surf(face);
+    if (surf.GetType() != GeomAbs_Plane) return std::nullopt;
+
+    const gp_Pln pln = surf.Plane();
+    const gp_Ax3 ax3 = pln.Position();
+    const gp_Pnt origin = ax3.Location();
+    gp_Dir normal = ax3.Direction();
+    if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+    const gp_Dir xdir = ax3.XDirection();
+
+    SketchPlane plane;
+    plane.origin = {origin.X(), origin.Y(), origin.Z()};
+    plane.normal = {normal.X(), normal.Y(), normal.Z()};
+    plane.xAxis = {xdir.X(), xdir.Y(), xdir.Z()};
+    return plane;
 }
 
 } // namespace lcad

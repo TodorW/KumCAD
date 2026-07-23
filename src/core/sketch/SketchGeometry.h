@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/core3d/Fingerprint.h"
 #include "core/geometry/Point2D.h"
 
 #include <vector>
@@ -174,6 +175,27 @@ public:
 
     const SketchPlane& placement() const { return m_placement; }
     void setPlacement(SketchPlane plane) { m_placement = plane; }
+
+    // Real "sketch on a face" attachment (FreeCAD/SolidWorks/Fusion's own
+    // everyday workflow: pick a planar face of an existing feature, sketch
+    // on it, then Pad from there) -- attachedFeature/attachedFace record
+    // which Document3D::features() index and TopExp::MapShapes face index
+    // this sketch's plane was last attached to (attachedFeature == -1
+    // means "free-standing," the default, matching every sketch's
+    // behavior before this existed), and attachedFaceFingerprint (see
+    // core/core3d/TopoNaming.h) lets Document3D re-resolve the actual
+    // current face index after an upstream recompute reshuffles OCCT's
+    // own face ordering -- the same topological-naming mitigation
+    // Fillet/Chamfer/Shell already rely on for edgeIndices/faceIndices.
+    // m_placement is kept in sync with the attachment by Document3D
+    // itself (see its own resolveSketchAttachment); this class only
+    // stores where it's attached, it doesn't resolve OCCT geometry
+    // itself (this header is deliberately zero-OCCT, see the file
+    // comment above).
+    int attachedFeature = -1;
+    int attachedFace = -1;
+    FaceFingerprint attachedFaceFingerprint;
+    bool isAttached() const { return attachedFeature >= 0; }
 
 private:
     std::vector<Point2D> m_points;

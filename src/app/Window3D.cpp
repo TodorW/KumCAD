@@ -16,6 +16,7 @@
 #include "core/core3d/Piping.h"
 #include "core/core3d/StepIges.h"
 #include "core/core3d/TechDraw.h"
+#include "core/core3d/TopoNaming.h"
 #include "core/document/Document.h"
 #include "core/io/DxfWriter.h"
 #include "core/lisp/LispInterpreter.h"
@@ -1337,6 +1338,7 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("List Edges..."), this, &Window3D::listSelectedFeatureEdges);
     toolbar->addAction(QStringLiteral("List Faces..."), this, &Window3D::listSelectedFeatureFaces);
     toolbar->addAction(QStringLiteral("New Sketch..."), this, &Window3D::openSketchEditor);
+    toolbar->addAction(QStringLiteral("Sketch on Face..."), this, &Window3D::openSketchOnFace);
     toolbar->addAction(QStringLiteral("Add Sketch Feature..."), this, &Window3D::addSketchFeature);
     toolbar->addAction(QStringLiteral("Variables..."), this, &Window3D::openVariablesDialog);
     toolbar->addAction(QStringLiteral("3D Lisp Console..."), this, &Window3D::openLisp3DConsole);
@@ -1515,6 +1517,47 @@ void Window3D::openSketchEditor() {
                                   .arg(sketch.lines().size())
                                   .arg(sketch.circles().size()),
                               6000);
+    refreshFeatureList();
+}
+
+void Window3D::openSketchOnFace() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature to sketch on first"), 3000);
+        return;
+    }
+    const int hostIndex = selected[0].row();
+    if (!m_document.isValid(hostIndex)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+
+    bool ok = false;
+    const int faceIndex = QInputDialog::getInt(
+        this, QStringLiteral("Sketch on Face"),
+        QStringLiteral("Face index (see List Faces... for each index's centroid):"), 0, 0, 9999, 1, &ok);
+    if (!ok) return;
+
+    const auto plane = lcad::planeFromFace(m_document.shapeAt(hostIndex), faceIndex);
+    if (!plane) {
+        QMessageBox::warning(this, QStringLiteral("Sketch on Face"),
+                              QStringLiteral("That face isn't planar or doesn't exist -- pick a flat face."));
+        return;
+    }
+
+    SketchEditorDialog dialog(m_document, *plane, this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const int sketchIndex = m_document.addSketch(std::move(dialog.view()->sketch()));
+    // hostIndex's shape is already computed (isValid checked above), so
+    // this always succeeds -- attachSketchToFace only fails on an
+    // out-of-range index or a non-planar face, both already ruled out.
+    m_document.attachSketchToFace(sketchIndex, hostIndex, faceIndex);
+    statusBar()->showMessage(QStringLiteral("Sketch %1 attached to feature %2's face %3")
+                                  .arg(sketchIndex)
+                                  .arg(hostIndex)
+                                  .arg(faceIndex),
+                              4000);
     refreshFeatureList();
 }
 

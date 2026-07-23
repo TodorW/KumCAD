@@ -60,6 +60,20 @@ public:
     int addSketch(Sketch sketch);
     const std::vector<Sketch>& sketches() const { return m_sketches; }
 
+    // Attaches sketchIndex's plane to the planar face at faceIndex (same
+    // numbering as Pick3D.h's pickFace) of featureIndex's current shape --
+    // the real "sketch on a face" workflow (see Sketch::attachedFeature's
+    // own comment). Captures faceIndex's fingerprint and immediately
+    // applies the resulting plane via Sketch::setPlacement, then
+    // recomputes every feature that directly references sketchIndex
+    // (sketchIndex/pathSketchIndex/sketchIndices) so the change is felt
+    // right away -- same "not itself a dependency the recompute engine
+    // understands, so recompute it explicitly here" contract addSketch's
+    // own comment already discloses. Returns false (no change) if either
+    // index is out of range, featureIndex has no valid shape, or the
+    // picked face isn't planar.
+    bool attachSketchToFace(int sketchIndex, int featureIndex, int faceIndex);
+
     // Shapes with no parametric recipe of their own -- read from an
     // external STEP/IGES file (StepIges.h) or restored from a .kcad3d's
     // embedded BRep blob (Persistence3D.h). A FeatureType::Imported
@@ -92,6 +106,23 @@ private:
     // evaluating each against m_variables. See Feature3D::expressions'
     // own comment for the "leave the previous value on failure" contract.
     void applyExpressions(Feature3D& f) const;
+    // If m_sketches[sketchIndex] is attached (see Sketch::isAttached), re-
+    // resolves its attachedFace against its attachedFeature's CURRENT
+    // shape (via TopoNaming::resolveFaceIndex) and refreshes its
+    // placement to match -- called right before every recomputeOne site
+    // that turns a sketch into geometry, so an attached sketch tracks its
+    // host face across any upstream recompute, the same topo-naming
+    // mitigation Fillet/Chamfer/Shell already get for edgeIndices/
+    // faceIndices. A no-op for a free-standing (unattached) sketch, or if
+    // sketchIndex is out of range, or if attachedFeature no longer has a
+    // valid shape. Same real, disclosed "nearest geometric match"
+    // limitation as resolveFaceIndex itself: a moderate edit to the host
+    // feature re-resolves correctly, but an extreme enough change can
+    // move the true face's centroid closer to a DIFFERENT face's stale-
+    // fingerprint distance than to its own -- see TopoNamingTests.cpp's
+    // own attachment test for exactly how far that margin goes on a
+    // simple box.
+    void resolveSketchAttachment(int sketchIndex);
 };
 
 } // namespace lcad

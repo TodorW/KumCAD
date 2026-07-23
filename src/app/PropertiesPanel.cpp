@@ -13,6 +13,7 @@
 #include "core/geometry/Leader.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MLeader.h"
+#include "core/geometry/MLine.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/AttDef.h"
 #include "core/geometry/ConstructionLine.h"
@@ -21,9 +22,11 @@
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
+#include "core/geometry/Tolerance.h"
 #include "core/geometry/Track.h"
 #include "core/geometry/Via.h"
 #include "core/geometry/Wipeout.h"
@@ -520,6 +523,34 @@ void PropertiesPanel::refresh() {
         m_summaryLabel->setText(QStringLiteral("Wipeout"));
         addRow(QStringLiteral("Vertices:"), QString::number(wipeout->vertices().size()));
         addRow(QStringLiteral("Show Frame:"), wipeout->showFrame() ? QStringLiteral("Yes") : QStringLiteral("No"));
+        break;
+    }
+    case lcad::EntityType::MLine: {
+        const auto* mline = static_cast<const lcad::MLineEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("MLine"));
+        addRow(QStringLiteral("Vertices:"), QString::number(mline->vertices().size()));
+        addRow(QStringLiteral("Elements:"), QString::number(mline->elements().size()));
+        addRow(QStringLiteral("Scale:"), formatNumber(mline->scale()));
+        addRow(QStringLiteral("Closed:"), mline->closed() ? QStringLiteral("Yes") : QStringLiteral("No"));
+        break;
+    }
+    case lcad::EntityType::Region: {
+        const auto* region = static_cast<const lcad::RegionEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Region"));
+        addRow(QStringLiteral("Loops:"), QString::number(region->loops().size()));
+        addRow(QStringLiteral("Area:"), formatNumber(region->area()));
+        break;
+    }
+    case lcad::EntityType::Tolerance: {
+        const auto* tolerance = static_cast<const lcad::ToleranceEntity*>(e);
+        m_summaryLabel->setText(QStringLiteral("Tolerance"));
+        addRow(QStringLiteral("Position X:"), formatNumber(tolerance->position().x));
+        addRow(QStringLiteral("Position Y:"), formatNumber(tolerance->position().y));
+        addRow(QStringLiteral("Rows:"), QString::number(tolerance->rows().size()));
+        if (!tolerance->rows().empty()) {
+            addRow(QStringLiteral("Row 1:"),
+                   QString::fromStdString(lcad::ToleranceEntity::rowText(tolerance->rows().front())));
+        }
         break;
     }
     }

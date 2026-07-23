@@ -17,10 +17,12 @@
 #include "core/geometry/Line.h"
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
+#include "core/geometry/MLine.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
+#include "core/geometry/Tolerance.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 #include "core/geometry/Track.h"
@@ -652,6 +654,66 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
             for (const Point2D& v : loop.vertices) {
                 writeGroup(out, 10, v.x);
                 writeGroup(out, 20, v.y);
+            }
+        }
+        break;
+    }
+    case EntityType::MLine: {
+        // Real DXF MLINE persists per-vertex direction/miter-direction
+        // vectors resolved against a separate named MLSTYLE object; this
+        // codebase's MLine embeds its element list directly (see MLine.h)
+        // and persists via the same custom-group-code convention as
+        // REGION/WIPEOUT above, under the real MLINE tag.
+        const auto& mline = static_cast<const MLineEntity&>(e);
+        writeGroup(out, 0, "MLINE");
+        writeCommon(out, document, e);
+        writeGroup(out, 70, mline.closed() ? 1 : 0);
+        writeGroup(out, 40, mline.scale());
+        writeGroup(out, 71, static_cast<int>(mline.startCap()));
+        writeGroup(out, 72, static_cast<int>(mline.endCap()));
+        writeGroup(out, 73, mline.showJoints() ? 1 : 0);
+        writeGroup(out, 74, static_cast<int>(mline.elements().size()));
+        for (const MLineElement& el : mline.elements()) {
+            writeGroup(out, 41, el.offset);
+            // Group 63, not 420: 420 is this codebase's own entity-WIDE
+            // truecolor override group (read back into every entity's
+            // colorOverride()), and MLINE needs one truecolor PER element
+            // instead -- reusing 420 here would have each element's color
+            // silently clobber the entity's own colorOverride() as it's
+            // read back, a real bug caught by tracing the reader's shared
+            // group-420 handling before shipping this.
+            writeGroup(out, 63, trueColor(el.color));
+        }
+        writeGroup(out, 90, static_cast<int>(mline.vertices().size()));
+        for (const Point2D& v : mline.vertices()) {
+            writeGroup(out, 10, v.x);
+            writeGroup(out, 20, v.y);
+        }
+        break;
+    }
+    case EntityType::Tolerance: {
+        // Real DXF TOLERANCE persists its whole visual representation
+        // pre-rendered as one group-1 text string with AutoCAD's own
+        // GDT-font control codes; this codebase persists the structured
+        // row data directly instead (custom group codes, same convention
+        // as above), which is what lets it round-trip and re-render
+        // exactly rather than needing to parse that encoding back apart.
+        const auto& tol = static_cast<const ToleranceEntity&>(e);
+        writeGroup(out, 0, "TOLERANCE");
+        writeCommon(out, document, e);
+        writeGroup(out, 10, tol.position().x);
+        writeGroup(out, 20, tol.position().y);
+        writeGroup(out, 40, tol.textHeight());
+        writeGroup(out, 90, static_cast<int>(tol.rows().size()));
+        for (const ToleranceRow& row : tol.rows()) {
+            writeGroup(out, 70, static_cast<int>(row.characteristic));
+            writeGroup(out, 71, row.diameterSymbol ? 1 : 0);
+            writeGroup(out, 41, row.toleranceValue);
+            writeGroup(out, 72, static_cast<int>(row.toleranceModifier));
+            writeGroup(out, 73, static_cast<int>(row.datums.size()));
+            for (const ToleranceDatumRef& d : row.datums) {
+                writeGroup(out, 1, d.letter);
+                writeGroup(out, 74, static_cast<int>(d.modifier));
             }
         }
         break;

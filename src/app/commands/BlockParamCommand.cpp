@@ -172,6 +172,8 @@ QString shortEntityTypeName(lcad::EntityType type) {
     case lcad::EntityType::Via: return QStringLiteral("Via");
     case lcad::EntityType::Wipeout: return QStringLiteral("Wipeout");
     case lcad::EntityType::Region: return QStringLiteral("Region");
+    case lcad::EntityType::MLine: return QStringLiteral("MLine");
+    case lcad::EntityType::Tolerance: return QStringLiteral("Tolerance");
     }
     return QStringLiteral("Entity");
 }

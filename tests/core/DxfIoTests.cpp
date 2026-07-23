@@ -170,6 +170,8 @@ TEST_CASE("DXF round-trip preserves entities and layers", "[dxf]") {
         case lcad::EntityType::Via:
         case lcad::EntityType::Wipeout:
         case lcad::EntityType::Region:
+        case lcad::EntityType::MLine:
+        case lcad::EntityType::Tolerance:
             break; // not part of this round-trip; covered by their own tests
         }
     }

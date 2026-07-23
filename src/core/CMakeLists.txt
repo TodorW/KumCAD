@@ -63,6 +63,10 @@ add_library(lcad_core STATIC
     geometry/Wipeout.cpp
     geometry/Region.h
     geometry/Region.cpp
+    geometry/MLine.h
+    geometry/MLine.cpp
+    geometry/Tolerance.h
+    geometry/Tolerance.cpp
     schematic/Netlist.h
     schematic/Netlist.cpp
     schematic/Spice.cpp

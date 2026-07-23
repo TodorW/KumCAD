@@ -18,9 +18,11 @@
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/PointEnt.h"
+#include "core/geometry/MLine.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
+#include "core/geometry/Tolerance.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 #include "core/geometry/Track.h"
@@ -535,6 +537,30 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         painter.setBrush(color);
         painter.drawPath(path);
         painter.setBrush(Qt::NoBrush);
+        break;
+    }
+    case lcad::EntityType::MLine: {
+        const auto& mline = static_cast<const lcad::MLineEntity&>(entity);
+        for (const auto& line : mline.elementLines()) {
+            QPolygonF poly;
+            for (const lcad::Point2D& v : line) poly << toScreen(v);
+            if (mline.closed() && !poly.isEmpty()) poly << poly.first();
+            painter.drawPolyline(poly);
+        }
+        break;
+    }
+    case lcad::EntityType::Tolerance: {
+        const auto& tol = static_cast<const lcad::ToleranceEntity&>(entity);
+        QFont font = painter.font();
+        font.setPixelSize(std::max(1, static_cast<int>(std::round(tol.textHeight() * scale))));
+        painter.save();
+        painter.setFont(font);
+        QPointF pos = toScreen(tol.position());
+        for (const lcad::ToleranceRow& row : tol.rows()) {
+            painter.drawText(pos, QString::fromStdString(lcad::ToleranceEntity::rowText(row)));
+            pos += QPointF(0, tol.textHeight() * scale);
+        }
+        painter.restore();
         break;
     }
     case lcad::EntityType::Insert: {

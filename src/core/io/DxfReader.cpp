@@ -18,10 +18,12 @@
 #include "core/geometry/Line.h"
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
+#include "core/geometry/MLine.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
 #include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
+#include "core/geometry/Tolerance.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
 #include "core/geometry/Track.h"
@@ -376,6 +378,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     std::vector<RegionLoop> regionLoops;      // REGION's own loops, built directly (not via polyVerts)
     int regionLoopVertsExpected = 0;          // REGION group 93 for the loop currently being read
     bool regionCurrentLoopWantHole = false;   // REGION group 92 for the loop currently being read
+    bool mlineClosed = false;
+    double mlineScale = 1.0;
+    int mlineStartCap = 0;
+    int mlineEndCap = 0;
+    bool mlineShowJoints = false;
+    std::vector<MLineElement> mlineElements; // group 41 (offset) pushes a new element; group 63 fills its color
+    std::vector<ToleranceRow> toleranceRows; // group 70 (characteristic) pushes a new row
     std::string insertName;
     double insertScale = 1.0;
     Point2D vpViewCenter; // VIEWPORT group 12/22
@@ -608,6 +617,12 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             made = std::make_unique<WipeoutEntity>(id, layerId, polyVerts, wipeoutShowFrame);
         } else if (curEntityType == "REGION" && !regionLoops.empty()) {
             made = std::make_unique<RegionEntity>(id, layerId, regionLoops);
+        } else if (curEntityType == "MLINE" && polyVerts.size() >= 2 && !mlineElements.empty()) {
+            made = std::make_unique<MLineEntity>(id, layerId, polyVerts, mlineElements, mlineScale > 1e-9 ? mlineScale : 1.0,
+                                                 mlineClosed, static_cast<MLineCapType>(mlineStartCap),
+                                                 static_cast<MLineCapType>(mlineEndCap), mlineShowJoints);
+        } else if (curEntityType == "TOLERANCE" && !toleranceRows.empty()) {
+            made = std::make_unique<ToleranceEntity>(id, layerId, p10, toleranceRows, textHeight > 1e-9 ? textHeight : 2.5);
         }
 
         const bool madeSomething = made != nullptr;
@@ -673,6 +688,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         regionLoops.clear();
         regionLoopVertsExpected = 0;
         regionCurrentLoopWantHole = false;
+        mlineClosed = false;
+        mlineScale = 1.0;
+        mlineStartCap = 0;
+        mlineEndCap = 0;
+        mlineShowJoints = false;
+        mlineElements.clear();
+        toleranceRows.clear();
         insertName.clear();
         insertScale = 1.0;
         splineDegree = 3;
@@ -1066,7 +1088,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             break;
         case 10:
             if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" ||
-                curEntityType == "WIRE" || curEntityType == "TRACK" || curEntityType == "WIPEOUT" || inVertex) {
+                curEntityType == "WIRE" || curEntityType == "TRACK" || curEntityType == "WIPEOUT" ||
+                curEntityType == "MLINE" || inVertex) {
                 pendingVertX = toDouble(g.value);
                 havePendingVertX = true;
             } else if (curEntityType == "HATCH") {
@@ -1086,7 +1109,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         case 20:
             if (curEntityType == "LWPOLYLINE" || curEntityType == "SPLINE" || curEntityType == "LEADER" || inVertex ||
                 curEntityType == "HATCH" || curEntityType == "WIRE" || curEntityType == "TRACK" ||
-                curEntityType == "WIPEOUT") {
+                curEntityType == "WIPEOUT" || curEntityType == "MLINE") {
                 if (havePendingVertX) {
                     polyVerts.emplace_back(pendingVertX, toDouble(g.value));
                     polyBulges.push_back(0.0); // a following group 42 may overwrite this
@@ -1170,6 +1193,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "NETLABEL") netLabelHeight = toDouble(g.value, 2.5);
             else if (curEntityType == "TRACK") trackWidth = toDouble(g.value, 0.25);
             else if (curEntityType == "VIA") viaDiameter = toDouble(g.value, 0.6);
+            else if (curEntityType == "TOLERANCE") textHeight = toDouble(g.value, 2.5);
+            else if (curEntityType == "MLINE") mlineScale = toDouble(g.value, 1.0);
             else radius = toDouble(g.value);
             break;
         case 41:
@@ -1180,6 +1205,19 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "IMAGE") imageHeight = toDouble(g.value);
             else if (curEntityType == "VIA") viaDrillDiameter = toDouble(g.value, 0.3);
             else if (curEntityType == "TEXT") textWidthFactor = toDouble(g.value, 1.0);
+            else if (curEntityType == "MLINE") {
+                // Starts a new element; group 63 right after fills its color.
+                MLineElement el;
+                el.offset = toDouble(g.value);
+                mlineElements.push_back(el);
+            } else if (curEntityType == "TOLERANCE" && !toleranceRows.empty()) {
+                toleranceRows.back().toleranceValue = toDouble(g.value);
+            }
+            break;
+        case 63:
+            if (curEntityType == "MLINE" && !mlineElements.empty()) {
+                mlineElements.back().color = colorFromTrueColor(toInt(g.value));
+            }
             break;
         case 290:
             if (curEntityType == "WIPEOUT") wipeoutShowFrame = toInt(g.value, 1) != 0;
@@ -1239,6 +1277,13 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 hatchSolid = (toInt(g.value) & 1) != 0;
             } else if (curEntityType == "MULTILEADER") {
                 mleaderLegSizes.push_back(toInt(g.value));
+            } else if (curEntityType == "MLINE") {
+                mlineClosed = toInt(g.value) != 0;
+            } else if (curEntityType == "TOLERANCE") {
+                // Starts a new row; groups 71/41/72/73(+datums) right after fill it in.
+                ToleranceRow row;
+                row.characteristic = static_cast<GeoCharacteristic>(toInt(g.value));
+                toleranceRows.push_back(row);
             }
             break;
         case 71:
@@ -1246,6 +1291,19 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "MTEXT") mtextAttachment = toInt(g.value, 1);
             else if (curEntityType == "IMAGE") imagePdfPage = toInt(g.value);
             else if (curEntityType == "DIMENSION") dimSubkind = toInt(g.value, 0);
+            else if (curEntityType == "MLINE") mlineStartCap = toInt(g.value);
+            else if (curEntityType == "TOLERANCE" && !toleranceRows.empty()) {
+                toleranceRows.back().diameterSymbol = toInt(g.value) != 0;
+            }
+            break;
+        case 72:
+            if (curEntityType == "MLINE") mlineEndCap = toInt(g.value);
+            else if (curEntityType == "TOLERANCE" && !toleranceRows.empty()) {
+                toleranceRows.back().toleranceModifier = static_cast<MaterialCondition>(toInt(g.value));
+            }
+            break;
+        case 73:
+            if (curEntityType == "MLINE") mlineShowJoints = toInt(g.value) != 0;
             break;
         case 92:
             if (curEntityType == "REGION") regionCurrentLoopWantHole = toInt(g.value) != 0;
@@ -1282,6 +1340,18 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "IMAGE") imagePath = g.value;
             else if (curEntityType == "POINTCLOUD") pointCloudPath = g.value;
             else if (curEntityType == "NETLABEL") netLabelName = g.value;
+            else if (curEntityType == "TOLERANCE" && !toleranceRows.empty()) {
+                // Starts a new datum reference on the current row; group
+                // 74 right after fills its material-condition modifier.
+                ToleranceDatumRef datum;
+                datum.letter = g.value;
+                toleranceRows.back().datums.push_back(datum);
+            }
+            break;
+        case 74:
+            if (curEntityType == "TOLERANCE" && !toleranceRows.empty() && !toleranceRows.back().datums.empty()) {
+                toleranceRows.back().datums.back().modifier = static_cast<MaterialCondition>(toInt(g.value));
+            }
             break;
         case 3:
             if (curEntityType == "MTEXT") mtextChunks += g.value;

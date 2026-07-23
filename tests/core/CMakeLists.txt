@@ -52,6 +52,8 @@ add_executable(lcad_core_tests
     SheetSetTests.cpp
     KiCadIoTests.cpp
     RegionTests.cpp
+    MLineTests.cpp
+    ToleranceTests.cpp
 )
 target_link_libraries(lcad_core_tests PRIVATE lcad_core Catch2::Catch2WithMain)
 

@@ -41,6 +41,8 @@ enum class EntityType {
     Via,              // PCB drilled through-layer connection
     Wipeout,          // AutoCAD WIPEOUT: masks whatever was drawn before it
     Region,           // closed planar region (with holes), boolean-composable
+    MLine,            // AutoCAD MLINE: parallel offset line elements
+    Tolerance,        // AutoCAD TOLERANCE: GD&T feature-control frame
 };
 
 // Object-snap candidate kinds, mirroring AutoCAD's OSNAP markers. The first

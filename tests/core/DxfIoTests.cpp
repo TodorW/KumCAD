@@ -18,6 +18,7 @@
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
@@ -168,6 +169,7 @@ TEST_CASE("DXF round-trip preserves entities and layers", "[dxf]") {
         case lcad::EntityType::Track:
         case lcad::EntityType::Via:
         case lcad::EntityType::Wipeout:
+        case lcad::EntityType::Region:
             break; // not part of this round-trip; covered by their own tests
         }
     }
@@ -1584,6 +1586,40 @@ TEST_CASE("DXF round-trips a WipeoutEntity including showFrame", "[dxf][wipeout]
         } else {
             REQUIRE(wipeout.vertices().size() == 3);
             REQUIRE_FALSE(wipeout.showFrame());
+        }
+        ++found;
+    }
+    REQUIRE(found == 2);
+}
+
+TEST_CASE("DXF round-trips a RegionEntity, including a loop with a hole", "[dxf][region]") {
+    TempDxfPath temp;
+
+    lcad::Document doc;
+    doc.addEntity(std::make_unique<lcad::RegionEntity>(
+        doc.reserveEntityId(), doc.currentLayer(),
+        std::vector<lcad::RegionLoop>{lcad::RegionLoop{{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}));
+    lcad::RegionLoop outer{{{0, 0}, {20, 0}, {20, 20}, {0, 20}}};
+    lcad::RegionLoop hole{{{5, 5}, {5, 8}, {8, 8}, {8, 5}}}; // wound CW: it's a hole
+    doc.addEntity(std::make_unique<lcad::RegionEntity>(doc.reserveEntityId(), doc.currentLayer(),
+                                                       std::vector<lcad::RegionLoop>{outer, hole}));
+
+    REQUIRE(lcad::writeDxf(doc, temp.path.string()));
+    lcad::Document loaded;
+    REQUIRE(lcad::readDxf(loaded, temp.path.string()));
+
+    int found = 0;
+    for (const lcad::Entity* e : loaded.entities()) {
+        if (e->type() != lcad::EntityType::Region) continue;
+        const auto& region = static_cast<const lcad::RegionEntity&>(*e);
+        if (region.loops().size() == 1) {
+            REQUIRE(region.area() == Approx(100.0));
+        } else {
+            REQUIRE(region.loops().size() == 2);
+            REQUIRE(region.area() == Approx(400.0 + 9.0));
+            const bool hasHole =
+                region.loops()[0].isHole() || region.loops()[1].isHole();
+            REQUIRE(hasHole);
         }
         ++found;
     }

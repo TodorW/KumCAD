@@ -19,6 +19,7 @@
 #include "core/geometry/MText.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
@@ -630,6 +631,28 @@ void writeEntity(std::ofstream& out, const Document& document, const Entity& e) 
         for (const Point2D& v : wipeout.vertices()) {
             writeGroup(out, 10, v.x);
             writeGroup(out, 20, v.y);
+        }
+        break;
+    }
+    case EntityType::Region: {
+        // A real DXF REGION entity is ACIS/SAT solid-modeler data (subclass
+        // AcDbRegion under AcDbModelerGeometry) -- this codebase has no
+        // ACIS kernel (see Region.h's own comment), so like WIPEOUT/TRACK/
+        // VIA above, this persists via a custom group-code loop list
+        // instead: safely skipped by real DXF readers (which expect ACIS
+        // groups here and won't find them), round-trips exactly within
+        // this app.
+        const auto& region = static_cast<const RegionEntity&>(e);
+        writeGroup(out, 0, "REGION");
+        writeCommon(out, document, e);
+        writeGroup(out, 91, static_cast<int>(region.loops().size()));
+        for (const RegionLoop& loop : region.loops()) {
+            writeGroup(out, 92, loop.isHole() ? 1 : 0);
+            writeGroup(out, 93, static_cast<int>(loop.vertices.size()));
+            for (const Point2D& v : loop.vertices) {
+                writeGroup(out, 10, v.x);
+                writeGroup(out, 20, v.y);
+            }
         }
         break;
     }

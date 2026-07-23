@@ -19,6 +19,7 @@
 #include "core/geometry/MText.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
@@ -31,6 +32,7 @@
 #include <QFont>
 #include <QFontMetricsF>
 #include <QLinearGradient>
+#include <QPainterPath>
 #include <QRadialGradient>
 #include <QPainter>
 #include <QPixmap>
@@ -513,6 +515,26 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
                 painter.drawLine(toScreen(a), toScreen(b));
             }
         }
+        break;
+    }
+    case lcad::EntityType::Region: {
+        // A QPainterPath with every loop added and the odd-even fill rule
+        // renders holes correctly regardless of each loop's own winding
+        // direction (Qt determines "inside" the same nonzero-agnostic way
+        // RegionEntity::containsPoint does).
+        const auto& region = static_cast<const lcad::RegionEntity&>(entity);
+        QPainterPath path;
+        path.setFillRule(Qt::OddEvenFill);
+        for (const lcad::RegionLoop& loop : region.loops()) {
+            if (loop.vertices.empty()) continue;
+            QPolygonF poly;
+            for (const lcad::Point2D& v : loop.vertices) poly << toScreen(v);
+            path.addPolygon(poly);
+            path.closeSubpath();
+        }
+        painter.setBrush(color);
+        painter.drawPath(path);
+        painter.setBrush(Qt::NoBrush);
         break;
     }
     case lcad::EntityType::Insert: {

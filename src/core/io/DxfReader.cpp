@@ -20,6 +20,7 @@
 #include "core/geometry/MText.h"
 #include "core/geometry/PointEnt.h"
 #include "core/geometry/Polyline.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Spline.h"
 #include "core/geometry/Table.h"
 #include "core/geometry/Text.h"
@@ -372,6 +373,9 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double hatchScale = 1.0;
     std::optional<Color> hatchGradientColor2; // HATCH group 421 (simplified GRADIENT marker)
     std::string hatchGradientPresetName;      // HATCH group 470
+    std::vector<RegionLoop> regionLoops;      // REGION's own loops, built directly (not via polyVerts)
+    int regionLoopVertsExpected = 0;          // REGION group 93 for the loop currently being read
+    bool regionCurrentLoopWantHole = false;   // REGION group 92 for the loop currently being read
     std::string insertName;
     double insertScale = 1.0;
     Point2D vpViewCenter; // VIEWPORT group 12/22
@@ -602,6 +606,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                                                viaDrillDiameter > 1e-9 ? viaDrillDiameter : 0.3);
         } else if (curEntityType == "WIPEOUT" && polyVerts.size() >= 3) {
             made = std::make_unique<WipeoutEntity>(id, layerId, polyVerts, wipeoutShowFrame);
+        } else if (curEntityType == "REGION" && !regionLoops.empty()) {
+            made = std::make_unique<RegionEntity>(id, layerId, regionLoops);
         }
 
         const bool madeSomething = made != nullptr;
@@ -664,6 +670,9 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
         hatchScale = 1.0;
         hatchGradientColor2.reset();
         hatchGradientPresetName.clear();
+        regionLoops.clear();
+        regionLoopVertsExpected = 0;
+        regionCurrentLoopWantHole = false;
         insertName.clear();
         insertScale = 1.0;
         splineDegree = 3;
@@ -1065,6 +1074,11 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                     pendingVertX = toDouble(g.value);
                     havePendingVertX = true;
                 }
+            } else if (curEntityType == "REGION") {
+                if (regionLoopVertsExpected > 0) {
+                    pendingVertX = toDouble(g.value);
+                    havePendingVertX = true;
+                }
             } else {
                 p10.x = toDouble(g.value);
             }
@@ -1078,6 +1092,23 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                     polyBulges.push_back(0.0); // a following group 42 may overwrite this
                     havePendingVertX = false;
                     if (curEntityType == "HATCH" && hatchVertsExpected > 0) --hatchVertsExpected;
+                }
+            } else if (curEntityType == "REGION") {
+                if (havePendingVertX && regionLoopVertsExpected > 0 && !regionLoops.empty()) {
+                    regionLoops.back().vertices.emplace_back(pendingVertX, toDouble(g.value));
+                    havePendingVertX = false;
+                    --regionLoopVertsExpected;
+                    if (regionLoopVertsExpected == 0) {
+                        // Orient this loop per its recorded hole flag
+                        // (winding is authoritative -- see RegionLoop's own
+                        // doc comment). This app's own writer already
+                        // matches, but don't trust hand-edited or foreign
+                        // files to have gotten winding right.
+                        RegionLoop& loop = regionLoops.back();
+                        if (loop.isHole() != regionCurrentLoopWantHole) {
+                            std::reverse(loop.vertices.begin(), loop.vertices.end());
+                        }
+                    }
                 }
             } else {
                 p10.y = toDouble(g.value);
@@ -1216,8 +1247,15 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
             else if (curEntityType == "IMAGE") imagePdfPage = toInt(g.value);
             else if (curEntityType == "DIMENSION") dimSubkind = toInt(g.value, 0);
             break;
+        case 92:
+            if (curEntityType == "REGION") regionCurrentLoopWantHole = toInt(g.value) != 0;
+            break;
         case 93:
             if (curEntityType == "HATCH") hatchVertsExpected = toInt(g.value);
+            else if (curEntityType == "REGION") {
+                regionLoops.push_back(RegionLoop{});
+                regionLoopVertsExpected = std::max(0, toInt(g.value));
+            }
             break;
         case 98:
             if (curEntityType == "HATCH") hatchVertsExpected = 0; // seed points follow; stop collecting

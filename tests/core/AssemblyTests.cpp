@@ -438,6 +438,94 @@ TEST_CASE("Assembly Tangent mate is idempotent: solving twice doesn't drift the 
     REQUIRE(secondZ == Approx(3.0).margin(1e-6));
 }
 
+TEST_CASE("Assembly Fixed mate is Concentric's point+direction alignment plus a pinning roll",
+          "[core3d][assembly][fixed]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(4.0);
+    const int idxB = asm_.addComponent(b);
+
+    Mate mate;
+    mate.type = MateType::Fixed;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 5.0; mate.ay = 5.0; mate.az = 0.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0; // A's axis points +Z
+    mate.bx = 2.0; mate.by = 2.0; mate.bz = 0.0;
+    mate.bdx = 0.0; mate.bdy = 0.0; mate.bdz = 1.0; // B's axis, also local +Z
+    mate.value = 90.0; // the roll that pins the last (spin-around-axis) DOF
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    const gp_Trsf& placement = asm_.components()[static_cast<std::size_t>(idxB)].placement;
+    const gp_Pnt worldRefB = gp_Pnt(2.0, 2.0, 0.0).Transformed(placement);
+    REQUIRE(worldRefB.X() == Approx(5.0).margin(1e-6)); // point coincidence, same as Concentric
+    REQUIRE(worldRefB.Y() == Approx(5.0).margin(1e-6));
+    REQUIRE(worldRefB.Z() == Approx(0.0).margin(1e-6));
+
+    const gp_Pnt zTipWorld = gp_Pnt(2.0, 2.0, 1.0).Transformed(placement);
+    REQUIRE(zTipWorld.Z() == Approx(1.0).margin(1e-6)); // same-sense, not flipped, same as Concentric
+
+    // The roll: a point one unit along B's local +X from its reference
+    // point must land one unit along world +Y from B's now-placed
+    // reference point -- a 90-degree spin around +Z, exactly Angle's own
+    // convention, proving Fixed doesn't leave that DOF free the way
+    // Concentric alone does.
+    const gp_Pnt xTipWorld = gp_Pnt(3.0, 2.0, 0.0).Transformed(placement);
+    REQUIRE((xTipWorld.X() - worldRefB.X()) == Approx(0.0).margin(1e-6));
+    REQUIRE((xTipWorld.Y() - worldRefB.Y()) == Approx(1.0).margin(1e-6));
+}
+
+TEST_CASE("Assembly Slider mate translates componentB along the shared axis without touching its rotation",
+          "[core3d][assembly][slider]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0);
+    a.fixed = true;
+    const int idxA = asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(4.0);
+    const int idxB = asm_.addComponent(b);
+
+    Mate mate;
+    mate.type = MateType::Slider;
+    mate.componentA = idxA;
+    mate.componentB = idxB;
+    mate.ax = 5.0; mate.ay = 5.0; mate.az = 0.0;
+    mate.adx = 0.0; mate.ady = 0.0; mate.adz = 1.0; // slide axis is world Z
+    mate.bx = 2.0; mate.by = 3.0; mate.bz = 1.0;    // B's own reference point, an arbitrary local offset
+    mate.value = 7.0;
+    asm_.addMate(mate);
+
+    asm_.solve();
+
+    const gp_Trsf& placement = asm_.components()[static_cast<std::size_t>(idxB)].placement;
+    // B starts at an identity placement, so before this mate its reference
+    // point's world position is exactly its own local coords (2,3,1).
+    // Slider only ever adjusts the component ALONG worldDirA (world Z);
+    // its off-axis (X/Y) position is left completely alone, unlike every
+    // point-mate type, which would snap it onto A's own (5,5) position.
+    const gp_Pnt worldRefB = gp_Pnt(2.0, 3.0, 1.0).Transformed(placement);
+    REQUIRE(worldRefB.X() == Approx(2.0).margin(1e-6)); // off-axis, untouched
+    REQUIRE(worldRefB.Y() == Approx(3.0).margin(1e-6)); // off-axis, untouched
+    REQUIRE(worldRefB.Z() == Approx(7.0).margin(1e-6)); // along-axis, pinned to `value`
+
+    // Rotation must be completely untouched (identity) -- a point one unit
+    // along B's local +X from its reference point must still be exactly
+    // one unit along world +X from it, not rotated at all.
+    const gp_Pnt xTipWorld = gp_Pnt(3.0, 3.0, 1.0).Transformed(placement);
+    REQUIRE((xTipWorld.X() - worldRefB.X()) == Approx(1.0).margin(1e-6));
+    REQUIRE((xTipWorld.Y() - worldRefB.Y()) == Approx(0.0).margin(1e-6));
+    REQUIRE((xTipWorld.Z() - worldRefB.Z()) == Approx(0.0).margin(1e-6));
+}
+
 TEST_CASE("detectInterferences reports overlapping placed components and skips non-overlapping ones",
          "[core3d][assembly][interference]") {
     Assembly asm_;

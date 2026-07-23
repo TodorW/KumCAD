@@ -88,6 +88,19 @@ void Assembly::solve() {
             continue;
         }
 
+        if (m.type == MateType::Slider) {
+            // Position-only: slide componentB's reference point along
+            // worldDirA until its distance from worldPointA is exactly
+            // `value`, touching nothing else (no rotation, no off-axis
+            // move) -- see MateType::Slider's own comment.
+            const gp_Pnt worldPointB = localPointB.Transformed(compB.placement);
+            const double currentDist = gp_Vec(worldPointA, worldPointB).Dot(gp_Vec(worldDirA));
+            gp_Trsf slide;
+            slide.SetTranslation(gp_Vec(worldDirA) * (m.value - currentDist));
+            compB.placement = slide.Multiplied(compB.placement);
+            continue;
+        }
+
         const bool antiParallel = (m.type == MateType::Coincident || m.type == MateType::Distance);
         gp_Dir targetDir = worldDirA;
         if (antiParallel) targetDir.Reverse();
@@ -101,7 +114,7 @@ void Assembly::solve() {
         gp_Trsf rotation;
         rotation.SetRotation(alignment);
 
-        if (m.type == MateType::Angle) {
+        if (m.type == MateType::Angle || m.type == MateType::Fixed) {
             gp_Trsf spin;
             spin.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), targetDir), m.value * M_PI / 180.0);
             rotation = spin.Multiplied(rotation);

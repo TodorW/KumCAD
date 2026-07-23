@@ -79,6 +79,28 @@ enum class MateType {
     // plane is left wherever it already was, only the perpendicular
     // distance from the plane is corrected to exactly `value`.
     Tangent,
+    // FreeCAD Assembly workbench's own "Fixed" joint: rigidly welds
+    // componentB to componentA with ZERO relative DOF -- mechanically
+    // identical to Concentric (point coincidence, reference directions
+    // parallel/same-sense) PLUS an explicit `value`-degree roll around
+    // the shared axis (reusing Angle's own extra-rotation step).
+    // Concentric alone leaves one rotational DOF (spin around the
+    // shared axis) unconstrained by construction, same as Coincident;
+    // the explicit roll is what actually pins that last DOF down to a
+    // single, fully-determined relative pose.
+    Fixed,
+    // FreeCAD Assembly workbench's own "Slider" joint: the classic
+    // 1-translational-DOF prismatic joint. Unlike every mate type
+    // above, Slider touches ONLY componentB's position, never its
+    // orientation -- componentB's reference point ends up exactly
+    // `value` along componentA's reference axis from componentA's own
+    // reference point (matching Tangent's own slide-along-axis
+    // mechanic, just without Tangent's preceding rotation step); its
+    // off-axis position and its rotation are both left exactly as they
+    // already were, the same "only touch what this mate actually
+    // constrains" philosophy Parallel/Perpendicular already use for
+    // orientation instead of position.
+    Slider,
 };
 
 struct Mate {

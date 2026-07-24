@@ -1199,16 +1199,42 @@ public:
         m_fixedXMax->setValue(0.0);
         form->addRow(QStringLiteral("Fix every node with X <=:"), m_fixedXMax);
 
+        m_fixedFaceIndices = new QLineEdit(this);
+        m_fixedFaceIndices->setPlaceholderText(QStringLiteral("blank = none, comma-separated, see List Faces..."));
+        form->addRow(QStringLiteral("Also Fix Nodes On Face Indices:"), m_fixedFaceIndices);
+
+        m_loadType = new QComboBox(this);
+        m_loadType->addItem(QStringLiteral("Point Force"), static_cast<int>(LoadKind::PointForce));
+        m_loadType->addItem(QStringLiteral("Body Force (e.g. gravity)"), static_cast<int>(LoadKind::BodyForce));
+        m_loadType->addItem(QStringLiteral("Face Pressure"), static_cast<int>(LoadKind::FacePressure));
+        form->addRow(QStringLiteral("Load Type:"), m_loadType);
+
         m_loadPoint = new QLineEdit(QStringLiteral("100,0,0"), this);
-        form->addRow(QStringLiteral("Load Point (x,y,z, nearest node):"), m_loadPoint);
+        form->addRow(QStringLiteral("Point Force -- Load Point (x,y,z, nearest node):"), m_loadPoint);
         m_loadForce = new QLineEdit(QStringLiteral("1000,0,0"), this);
-        form->addRow(QStringLiteral("Load Force Vector (x,y,z):"), m_loadForce);
+        form->addRow(QStringLiteral("Point Force -- Load Force Vector (x,y,z):"), m_loadForce);
+
+        m_bodyForce = new QLineEdit(QStringLiteral("0,0,-9.8"), this);
+        form->addRow(QStringLiteral("Body Force -- Force Per Volume (x,y,z):"), m_bodyForce);
+
+        m_pressureFaceIndices = new QLineEdit(this);
+        m_pressureFaceIndices->setPlaceholderText(QStringLiteral("comma-separated, see List Faces..."));
+        form->addRow(QStringLiteral("Face Pressure -- Face Indices:"), m_pressureFaceIndices);
+        m_pressureMagnitude = new QDoubleSpinBox(this);
+        m_pressureMagnitude->setRange(-1e9, 1e9);
+        m_pressureMagnitude->setDecimals(3);
+        m_pressureMagnitude->setValue(1.0);
+        form->addRow(QStringLiteral("Face Pressure -- Magnitude (force/area):"), m_pressureMagnitude);
+        m_pressureDirection = new QLineEdit(QStringLiteral("0,0,-1"), this);
+        form->addRow(QStringLiteral("Face Pressure -- Direction (x,y,z, need not be unit):"), m_pressureDirection);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         form->addRow(buttons);
     }
+
+    enum class LoadKind { PointForce, BodyForce, FacePressure };
 
     int divisions() const { return m_divisions->value(); }
 
@@ -1219,17 +1245,32 @@ public:
         return material;
     }
 
+    // Only the plane-clamp part -- fixedNodeIndices (real per-face
+    // fixing, see fixedFaceIndices() below) needs the mesh to resolve, so
+    // the caller merges that in after buildVoxelMesh runs.
     lcad::FemBoundaryCondition boundaryCondition() const {
         lcad::FemBoundaryCondition bc;
         bc.fixedXMax = m_fixedXMax->value();
         return bc;
     }
 
+    std::vector<int> fixedFaceIndices() const { return parseIndices(m_fixedFaceIndices->text()); }
+
+    LoadKind loadKind() const { return static_cast<LoadKind>(m_loadType->currentData().toInt()); }
+
+    // Only valid (and only meaningful) for LoadKind::PointForce -- see
+    // loadKind() above; the other two kinds need the mesh to resolve into
+    // real FemLoads, same reasoning as fixedFaceIndices().
     std::vector<lcad::FemLoad> loads() const {
         const std::array<double, 3> point = parseTriplet(m_loadPoint->text());
         const std::array<double, 3> force = parseTriplet(m_loadForce->text());
         return {lcad::FemLoad{point, force}};
     }
+
+    std::array<double, 3> bodyForceVector() const { return parseTriplet(m_bodyForce->text()); }
+    std::vector<int> pressureFaceIndices() const { return parseIndices(m_pressureFaceIndices->text()); }
+    double pressureMagnitude() const { return m_pressureMagnitude->value(); }
+    std::array<double, 3> pressureDirection() const { return parseTriplet(m_pressureDirection->text()); }
 
 private:
     static std::array<double, 3> parseTriplet(const QString& text) {
@@ -1239,12 +1280,28 @@ private:
         return result;
     }
 
+    static std::vector<int> parseIndices(const QString& text) {
+        std::vector<int> result;
+        for (const QString& token : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            bool ok = false;
+            const int value = token.trimmed().toInt(&ok);
+            if (ok) result.push_back(value);
+        }
+        return result;
+    }
+
     QSpinBox* m_divisions;
     QDoubleSpinBox* m_youngsModulus;
     QDoubleSpinBox* m_poissonsRatio;
     QDoubleSpinBox* m_fixedXMax;
+    QLineEdit* m_fixedFaceIndices;
+    QComboBox* m_loadType;
     QLineEdit* m_loadPoint;
     QLineEdit* m_loadForce;
+    QLineEdit* m_bodyForce;
+    QLineEdit* m_pressureFaceIndices;
+    QDoubleSpinBox* m_pressureMagnitude;
+    QLineEdit* m_pressureDirection;
 };
 
 // FEMMODAL: no loads (a vibration mode doesn't need any), but adds a
@@ -2399,8 +2456,39 @@ void Window3D::runFemAnalysis() {
         return;
     }
 
-    const lcad::FemResult result =
-        lcad::solveLinearStatic(mesh, dialog.material(), dialog.boundaryCondition(), dialog.loads());
+    // A real face-to-node resolution tolerance derived from the mesh's own
+    // voxel cell width (longest bounding-box axis / divisions), matching
+    // nodesOnFaces' own documented guidance -- not a magic number.
+    Bnd_Box femBounds;
+    BRepBndLib::Add(target, femBounds);
+    double femXMin = 0, femYMin = 0, femZMin = 0, femXMax = 0, femYMax = 0, femZMax = 0;
+    femBounds.Get(femXMin, femYMin, femZMin, femXMax, femYMax, femZMax);
+    const double femLongestAxis = std::max({femXMax - femXMin, femYMax - femYMin, femZMax - femZMin});
+    const double faceTolerance = (femLongestAxis / std::max(1, dialog.divisions())) * 1.5;
+
+    lcad::FemBoundaryCondition bc = dialog.boundaryCondition();
+    const std::vector<int> fixedFaces = dialog.fixedFaceIndices();
+    if (!fixedFaces.empty()) {
+        const std::vector<int> fixedFromFaces = lcad::nodesOnFaces(mesh, target, fixedFaces, faceTolerance);
+        bc.fixedNodeIndices.insert(bc.fixedNodeIndices.end(), fixedFromFaces.begin(), fixedFromFaces.end());
+    }
+
+    std::vector<lcad::FemLoad> loads;
+    switch (dialog.loadKind()) {
+    case FemDialog::LoadKind::PointForce:
+        loads = dialog.loads();
+        break;
+    case FemDialog::LoadKind::BodyForce:
+        loads = lcad::distributedBodyForce(mesh, dialog.bodyForceVector());
+        break;
+    case FemDialog::LoadKind::FacePressure:
+        loads = lcad::distributedPressureLoadOnFaces(mesh, target, dialog.pressureFaceIndices(),
+                                                     dialog.pressureMagnitude(), dialog.pressureDirection(),
+                                                     faceTolerance);
+        break;
+    }
+
+    const lcad::FemResult result = lcad::solveLinearStatic(mesh, dialog.material(), bc, loads);
     if (!result.solved) {
         QMessageBox::warning(this, QStringLiteral("Analysis Failed"),
                               QStringLiteral("The system could not be solved -- check that enough nodes are "

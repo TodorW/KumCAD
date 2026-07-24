@@ -153,16 +153,21 @@ AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly) {
     return report;
 }
 
-std::vector<InterferencePair> detectInterferences(const Assembly& assembly) {
-    std::vector<InterferencePair> result;
+std::vector<TopoDS_Shape> assemblyPlacedShapes(const Assembly& assembly) {
     const auto& components = assembly.components();
-    constexpr double kVolumeEpsilon = 1e-6;
-
     std::vector<TopoDS_Shape> placed(components.size());
     for (std::size_t i = 0; i < components.size(); ++i) {
         if (components[i].shape.IsNull()) continue;
         placed[i] = BRepBuilderAPI_Transform(components[i].shape, components[i].placement, true).Shape();
     }
+    return placed;
+}
+
+std::vector<InterferencePair> detectInterferences(const Assembly& assembly) {
+    std::vector<InterferencePair> result;
+    constexpr double kVolumeEpsilon = 1e-6;
+
+    const std::vector<TopoDS_Shape> placed = assemblyPlacedShapes(assembly);
 
     for (std::size_t i = 0; i < placed.size(); ++i) {
         if (placed[i].IsNull()) continue;

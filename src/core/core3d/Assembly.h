@@ -155,6 +155,14 @@ struct AssemblyDofReport {
 
 AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly);
 
+// Every component's own shape transformed by its CURRENT world placement
+// (call Assembly::solve() first if mates haven't been solved yet) --
+// parallel to assembly.components(), with a null entry wherever that
+// component's own shape is null. Shared by detectInterferences below and
+// by STEP/IGES export of a whole assembled product (see StepIges.h's
+// vector-of-shapes overloads).
+std::vector<TopoDS_Shape> assemblyPlacedShapes(const Assembly& assembly);
+
 // One pair of components whose placed (world-transformed) shapes overlap
 // by a non-trivial volume.
 struct InterferencePair {

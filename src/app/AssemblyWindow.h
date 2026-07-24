@@ -25,6 +25,7 @@ private:
     void solve();
     void checkDof();
     void checkInterferences();
+    void exportStep();
     void refreshComponentList();
     void refreshMateList();
     void refreshViewport();

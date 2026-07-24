@@ -239,6 +239,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("Solve"), this, &AssemblyWindow::solve);
     toolbar->addAction(QStringLiteral("Check DOF..."), this, &AssemblyWindow::checkDof);
     toolbar->addAction(QStringLiteral("Check Interferences..."), this, &AssemblyWindow::checkInterferences);
+    toolbar->addAction(QStringLiteral("Export STEP..."), this, &AssemblyWindow::exportStep);
 
     if (m_viewport->isAvailable()) {
         statusBar()->showMessage(QStringLiteral("Add components from STEP files, define mates between them, then "
@@ -334,6 +335,17 @@ void AssemblyWindow::checkInterferences() {
                        .arg(pair.interferenceVolume);
     }
     QMessageBox::warning(this, QStringLiteral("Assembly Interference Check"), message);
+}
+
+void AssemblyWindow::exportStep() {
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Assembly STEP"), QString(),
+                                                       QStringLiteral("STEP Files (*.step)"));
+    if (path.isEmpty()) return;
+    if (!lcad::writeStep(lcad::assemblyPlacedShapes(m_assembly), path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("STEP export failed -- no valid component shapes to export"), 4000);
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Exported assembly STEP to %1").arg(path), 3000);
 }
 
 void AssemblyWindow::refreshComponentList() {

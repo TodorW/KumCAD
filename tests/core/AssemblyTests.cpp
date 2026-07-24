@@ -1,5 +1,7 @@
 #include "core/core3d/Assembly.h"
 
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
@@ -553,4 +555,43 @@ TEST_CASE("detectInterferences reports overlapping placed components and skips n
     // the whole smaller box: 4*4*4 = 64.
     REQUIRE(pairs[0].interferenceVolume == Approx(64.0).epsilon(0.01));
     (void)idxDisjoint;
+}
+
+TEST_CASE("assemblyPlacedShapes transforms each component's own shape by its current world placement, "
+         "leaving a null component shape null",
+         "[core3d][assembly]") {
+    Assembly asm_;
+    AssemblyComponent a;
+    a.shape = makeBox(10.0); // [0,10]^3 locally, identity placement -- stays there
+    a.fixed = true;
+    asm_.addComponent(a);
+
+    AssemblyComponent b;
+    b.shape = makeBox(4.0); // [0,4]^3 locally
+    b.placement.SetTranslationPart(gp_Vec(5.0, 5.0, 5.0));
+    asm_.addComponent(b);
+
+    AssemblyComponent nullComp;
+    asm_.addComponent(nullComp); // shape deliberately left null
+
+    const std::vector<TopoDS_Shape> placed = assemblyPlacedShapes(asm_);
+    REQUIRE(placed.size() == 3);
+    REQUIRE_FALSE(placed[0].IsNull());
+    REQUIRE_FALSE(placed[1].IsNull());
+    REQUIRE(placed[2].IsNull());
+
+    Bnd_Box boxA;
+    BRepBndLib::Add(placed[0], boxA);
+    double xminA, yminA, zminA, xmaxA, ymaxA, zmaxA;
+    boxA.Get(xminA, yminA, zminA, xmaxA, ymaxA, zmaxA);
+    REQUIRE(xminA == Approx(0.0).margin(1e-6));
+    REQUIRE(xmaxA == Approx(10.0).margin(1e-6));
+
+    Bnd_Box boxB;
+    BRepBndLib::Add(placed[1], boxB);
+    double xminB, yminB, zminB, xmaxB, ymaxB, zmaxB;
+    boxB.Get(xminB, yminB, zminB, xmaxB, ymaxB, zmaxB);
+    // Local [0,4]^3 translated to world (5,5,5) becomes world [5,9]^3.
+    REQUIRE(xminB == Approx(5.0).margin(1e-6));
+    REQUIRE(xmaxB == Approx(9.0).margin(1e-6));
 }

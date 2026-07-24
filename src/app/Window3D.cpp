@@ -101,6 +101,7 @@ QString typeName(FeatureType type) {
     case FeatureType::Hole: return QStringLiteral("Hole");
     case FeatureType::Slice: return QStringLiteral("Slice");
     case FeatureType::PressPull: return QStringLiteral("PressPull");
+    case FeatureType::DeleteFace: return QStringLiteral("DeleteFace");
     }
     return QStringLiteral("Feature");
 }

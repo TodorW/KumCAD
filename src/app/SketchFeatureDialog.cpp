@@ -52,6 +52,7 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     m_typeCombo->addItem(QStringLiteral("Hole"), static_cast<int>(FeatureType::Hole));
     m_typeCombo->addItem(QStringLiteral("Slice"), static_cast<int>(FeatureType::Slice));
     m_typeCombo->addItem(QStringLiteral("PressPull"), static_cast<int>(FeatureType::PressPull));
+    m_typeCombo->addItem(QStringLiteral("Delete Face"), static_cast<int>(FeatureType::DeleteFace));
     form->addRow(QStringLiteral("Type:"), m_typeCombo);
     connect(m_typeCombo, &QComboBox::currentIndexChanged, this, &SketchFeatureDialog::updateHint);
 
@@ -206,7 +207,8 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
 
     m_faceIndices = new QLineEdit(this);
     m_faceIndices->setPlaceholderText(QStringLiteral("required -- which face(s) to open, see Pick3D.h's pickFace"));
-    form->addRow(QStringLiteral("Shell/Draft Face Indices (comma-separated) / PressPull Face Index (exactly one):"),
+    form->addRow(QStringLiteral("Shell/Draft/Delete Face Face Indices (comma-separated) / PressPull Face Index "
+                                "(exactly one):"),
                 m_faceIndices);
 
     m_sketchIndices = new QLineEdit(this);
@@ -297,6 +299,12 @@ void SketchFeatureDialog::updateHint() {
                           "normal by the signed distance in the Height/.../Signed Distance field -- positive "
                           "pulls out and adds material, negative pushes in and removes it. Only a planar face "
                           "can be picked."));
+        break;
+    case FeatureType::DeleteFace:
+        m_hintLabel->setText(
+            QStringLiteral("Delete Face: removes Target's listed Face Indices entirely (real OCCT feature "
+                          "removal) and heals the surrounding geometry back closed -- strips out a fillet, "
+                          "chamfer, hole, or boss with no earlier feature to just delete instead."));
         break;
     default:
         break;

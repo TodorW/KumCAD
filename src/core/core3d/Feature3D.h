@@ -165,6 +165,22 @@ enum class FeatureType {
                    // Fillet/Chamfer's own "empty means every edge"
                    // convention -- PRESSPULL always acts on one picked
                    // face at a time, same as a real interactive session).
+    DeleteFace,    // real AutoCAD SOLIDEDIT "Delete Face" / FreeCAD-style
+                   // "feature removal": removes inputA's listed
+                   // faceIndices entirely and heals the surrounding
+                   // geometry so it closes back up cleanly -- the way to
+                   // strip out a fillet/chamfer/hole/boss that was cut
+                   // directly into an imported or otherwise-non-
+                   // parametric solid, where there's no earlier feature
+                   // in this document's own tree to just delete instead.
+                   // Built on real OCCT feature-removal
+                   // (BRepAlgoAPI_Defeaturing/BOPAlgo_RemoveFeatures), not
+                   // a hand-rolled patch -- it plans and rebuilds the
+                   // adjacent faces itself, the same real algorithm a
+                   // commercial "suppress feature" tool relies on.
+                   // faceIndices must be non-empty (unlike Fillet/
+                   // Chamfer's "empty means every edge": deleting every
+                   // face would leave nothing).
 };
 
 struct Feature3D {

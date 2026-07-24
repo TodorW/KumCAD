@@ -8,6 +8,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Defeaturing.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -877,6 +878,32 @@ void Document3D::recomputeOne(int index) {
             ok = op.IsDone();
             if (ok) shape = op.Shape();
         }
+        break;
+    }
+    case FeatureType::DeleteFace: {
+        if (f.inputA < 0 || f.inputA >= index || !isValid(f.inputA) || f.faceIndices.empty()) {
+            ok = false;
+            break;
+        }
+        const TopoDS_Shape& target = m_shapes[static_cast<std::size_t>(f.inputA)];
+        TopTools_IndexedMapOfShape faceMap;
+        TopExp::MapShapes(target, TopAbs_FACE, faceMap);
+        TopTools_ListOfShape facesToRemove;
+        for (int faceIndex : reresolveIndices(target, f.faceIndices, f.faceFingerprints)) {
+            if (faceIndex < 0 || faceIndex >= faceMap.Extent()) continue;
+            facesToRemove.Append(faceMap(faceIndex + 1));
+        }
+        if (facesToRemove.IsEmpty()) {
+            ok = false;
+            break;
+        }
+        BRepAlgoAPI_Defeaturing defeature;
+        defeature.SetShape(target);
+        defeature.AddFacesToRemove(facesToRemove);
+        defeature.SetRunParallel(false);
+        defeature.Build();
+        ok = defeature.IsDone();
+        if (ok) shape = defeature.Shape();
         break;
     }
     case FeatureType::LinearPattern:

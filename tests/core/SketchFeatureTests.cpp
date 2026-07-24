@@ -6,6 +6,8 @@
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -151,6 +153,83 @@ TEST_CASE("Document3D Chamfer bevels every edge of a box, changing its volume sl
     const double chamferVolume = volumeOf(doc.shapeAt(chamferIdx));
     REQUIRE(chamferVolume < boxVolume);
     REQUIRE(chamferVolume > boxVolume * 0.9);
+}
+
+TEST_CASE("Document3D DeleteFace removes a chamfer bevel and heals the box back to its exact original volume",
+         "[core3d][deleteface][pick]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+    const double boxVolume = 20.0 * 20.0 * 20.0;
+
+    // Chamfer just the one vertical edge at x=20,y=20 (same edge the
+    // Fillet-with-specific-edgeIndices test above already picks the
+    // same way), a real bevel that changes the solid's shape.
+    PickRay edgeRay;
+    edgeRay.origin = {20.1, 20.0, -50.0};
+    edgeRay.direction = {0.0, 0.0, 1.0};
+    const auto pickedEdge = pickEdge(doc.shapeAt(boxIdx), edgeRay, 0.5);
+    REQUIRE(pickedEdge.has_value());
+
+    Feature3D chamfer;
+    chamfer.type = FeatureType::Chamfer;
+    chamfer.inputA = boxIdx;
+    chamfer.p1 = 3.0;
+    chamfer.edgeIndices = {pickedEdge->edgeIndex};
+    const int chamferIdx = doc.addFeature(chamfer);
+    REQUIRE(doc.isValid(chamferIdx));
+    REQUIRE(volumeOf(doc.shapeAt(chamferIdx)) < boxVolume); // real material removed by the bevel
+
+    // The chamfer added exactly one new face (7 total vs. the box's own
+    // 6) -- rather than hand-deriving which index it landed at (the
+    // bevel's exact footprint depends on BRepFilletAPI_MakeChamfer's own
+    // single-distance convention, not worth re-deriving here), try
+    // DeleteFace on every face and require that (at least) one of them
+    // really does restore the box's exact original volume -- a real,
+    // exact correctness check either way, just not committed to a
+    // specific index.
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(doc.shapeAt(chamferIdx), TopAbs_FACE, faceMap);
+    REQUIRE(faceMap.Extent() == 7); // 6 original faces + 1 new bevel face
+
+    bool foundRestoringFace = false;
+    for (int i = 0; i < faceMap.Extent() && !foundRestoringFace; ++i) {
+        Feature3D deleteFace;
+        deleteFace.type = FeatureType::DeleteFace;
+        deleteFace.inputA = chamferIdx;
+        deleteFace.faceIndices = {i};
+        const int deletedIdx = doc.addFeature(deleteFace);
+        if (doc.isValid(deletedIdx) &&
+            std::abs(volumeOf(doc.shapeAt(deletedIdx)) - boxVolume) < 1e-3) {
+            foundRestoringFace = true;
+        }
+    }
+    // Real defeaturing reconstructs the two adjacent faces back to their
+    // natural intersection -- for a simple axis-aligned chamfer, that IS
+    // exactly the original sharp box, an exact volume, not approximate.
+    REQUIRE(foundRestoringFace);
+}
+
+TEST_CASE("Document3D DeleteFace rejects a missing target or empty faceIndices", "[core3d][deleteface]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D missingTarget;
+    missingTarget.type = FeatureType::DeleteFace;
+    missingTarget.inputA = -1;
+    missingTarget.faceIndices = {0};
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(missingTarget)));
+
+    Feature3D noFaces;
+    noFaces.type = FeatureType::DeleteFace;
+    noFaces.inputA = boxIdx;
+    // faceIndices left empty -- deleting every face would leave nothing.
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(noFaces)));
 }
 
 TEST_CASE("Document3D Fillet with specific edgeIndices rounds less material than every-edge mode",

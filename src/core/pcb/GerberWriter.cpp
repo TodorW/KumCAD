@@ -23,23 +23,30 @@ std::string formatCoord(double mm) {
     return std::to_string(static_cast<long long>(std::llround(mm * 1e5)));
 }
 
-// RoundRect and Trapezoid have no native flash-aperture code in the Gerber
-// spec (only Circle/Rect/Oval/Polygon do) -- they're emitted as an
-// aperture macro instead (RS-274X primitive 4, Outline), built from the
-// exact same PadShapeGeometry outline EntityPainter and Board3D use, so
-// every consumer agrees on one real shape.
-enum class ApertureShape { Circle, Rect, Oval, RoundRect, Trapezoid };
+// RoundRect, Trapezoid, and Custom have no native flash-aperture code in
+// the Gerber spec (only Circle/Rect/Oval/Polygon do) -- they're emitted as
+// an aperture macro instead (RS-274X primitive 4, Outline), built from the
+// exact same outline EntityPainter and Board3D use (PadShapeGeometry for
+// the first two, Pad::customOutline directly for the third), so every
+// consumer agrees on one real shape.
+enum class ApertureShape { Circle, Rect, Oval, RoundRect, Trapezoid, Custom };
 
 struct ApertureKey {
     ApertureShape shape;
     double dim1, dim2; // dim2 unused for Circle
     double dim3 = 0.0; // shapeParam, only used for RoundRect/Trapezoid
+    std::vector<Point2D> customPoints; // only used for Custom
 
     bool operator<(const ApertureKey& other) const {
         if (shape != other.shape) return shape < other.shape;
         if (std::abs(dim1 - other.dim1) > 1e-6) return dim1 < other.dim1;
         if (std::abs(dim2 - other.dim2) > 1e-6) return dim2 < other.dim2;
         if (std::abs(dim3 - other.dim3) > 1e-6) return dim3 < other.dim3;
+        if (customPoints.size() != other.customPoints.size()) return customPoints.size() < other.customPoints.size();
+        for (std::size_t i = 0; i < customPoints.size(); ++i) {
+            if (std::abs(customPoints[i].x - other.customPoints[i].x) > 1e-6) return customPoints[i].x < other.customPoints[i].x;
+            if (std::abs(customPoints[i].y - other.customPoints[i].y) > 1e-6) return customPoints[i].y < other.customPoints[i].y;
+        }
         return false;
     }
 };
@@ -59,13 +66,21 @@ public:
         std::string out;
         int id = 10;
         for (const ApertureKey& key : m_order) {
-            if (key.shape == ApertureShape::RoundRect || key.shape == ApertureShape::Trapezoid) {
-                const std::vector<Point2D> outline = key.shape == ApertureShape::RoundRect
-                                                          ? roundRectPadOutline(key.dim1, key.dim2, key.dim3)
-                                                          : trapezoidPadOutline(key.dim1, key.dim2, key.dim3);
-                const std::string macroName =
-                    (key.shape == ApertureShape::RoundRect ? std::string("RRECT") : std::string("TRAP")) +
-                    std::to_string(id);
+            if (key.shape == ApertureShape::RoundRect || key.shape == ApertureShape::Trapezoid ||
+                key.shape == ApertureShape::Custom) {
+                std::vector<Point2D> outline;
+                std::string prefix;
+                if (key.shape == ApertureShape::RoundRect) {
+                    outline = roundRectPadOutline(key.dim1, key.dim2, key.dim3);
+                    prefix = "RRECT";
+                } else if (key.shape == ApertureShape::Trapezoid) {
+                    outline = trapezoidPadOutline(key.dim1, key.dim2, key.dim3);
+                    prefix = "TRAP";
+                } else {
+                    outline = key.customPoints; // registerPadApertures only registers Custom with >= 3 points
+                    prefix = "CUSTOM";
+                }
+                const std::string macroName = prefix + std::to_string(id);
                 std::ostringstream macro;
                 macro << "%AM" << macroName << "*\n4,1," << outline.size() << ",";
                 for (const Point2D& p : outline) macro << p.x << "," << p.y << ",";
@@ -182,21 +197,33 @@ bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& pat
 
     ApertureTable apertures;
     std::map<const TrackEntity*, int> trackAperture;
-    for (const auto* t : tracks) trackAperture[t] = apertures.idFor({ApertureShape::Circle, t->width(), 0.0});
+    for (const auto* t : tracks) trackAperture[t] = apertures.idFor({ApertureShape::Circle, t->width(), 0.0, 0.0, {}});
     std::map<const ViaEntity*, int> viaAperture;
-    for (const auto* v : vias) viaAperture[v] = apertures.idFor({ApertureShape::Circle, v->diameter(), 0.0});
+    for (const auto* v : vias) viaAperture[v] = apertures.idFor({ApertureShape::Circle, v->diameter(), 0.0, 0.0, {}});
     std::map<const Pad*, int> padAperture;
     auto registerPadApertures = [&](const InsertEntity* fp) {
         for (const Pad& pad : fp->block()->pads) {
             ApertureShape shape = ApertureShape::Circle;
+            std::vector<Point2D> customPoints;
             switch (pad.shape) {
             case PadShape::Round: shape = ApertureShape::Circle; break;
             case PadShape::Rect: shape = ApertureShape::Rect; break;
             case PadShape::Oval: shape = ApertureShape::Oval; break;
             case PadShape::RoundRect: shape = ApertureShape::RoundRect; break;
             case PadShape::Trapezoid: shape = ApertureShape::Trapezoid; break;
+            case PadShape::Custom:
+                // A degenerate custom pad (fewer than 3 outline points)
+                // registers as a plain Rect, the same fallback every other
+                // PadShape::Custom consumer uses.
+                if (pad.customOutline.size() >= 3) {
+                    shape = ApertureShape::Custom;
+                    customPoints = pad.customOutline;
+                } else {
+                    shape = ApertureShape::Rect;
+                }
+                break;
             }
-            padAperture[&pad] = apertures.idFor({shape, pad.width, pad.height, pad.shapeParam});
+            padAperture[&pad] = apertures.idFor({shape, pad.width, pad.height, pad.shapeParam, customPoints});
         }
     };
     for (const auto* fp : footprints) registerPadApertures(fp);

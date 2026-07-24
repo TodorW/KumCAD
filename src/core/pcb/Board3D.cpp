@@ -52,6 +52,9 @@ TopoDS_Shape buildPadShape(const Pad& pad, const Point2D& position, double z, do
         return buildPolygonPadShape(roundRectPadOutline(pad.width, pad.height, pad.shapeParam), position, z, thickness);
     case PadShape::Trapezoid:
         return buildPolygonPadShape(trapezoidPadOutline(pad.width, pad.height, pad.shapeParam), position, z, thickness);
+    case PadShape::Custom:
+        if (pad.customOutline.size() >= 3) return buildPolygonPadShape(pad.customOutline, position, z, thickness);
+        [[fallthrough]]; // degenerate custom pad: fall back to the plain Rect box below
     case PadShape::Rect:
     case PadShape::Oval:
         return BRepPrimAPI_MakeBox(gp_Pnt(position.x - pad.width / 2.0, position.y - pad.height / 2.0, z), pad.width,

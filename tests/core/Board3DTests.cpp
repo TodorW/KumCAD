@@ -214,6 +214,58 @@ TEST_CASE("buildBoard3D builds a RoundRect pad's real solid with the exact expec
     REQUIRE(volumeOf(shapes.copper[0]) == Approx(4.0 * 2.0 * params.copperThickness).margin(1e-6));
 }
 
+TEST_CASE("buildBoard3D builds a Custom pad's real solid from its own outline, with the exact expected volume",
+         "[core3d][board3d][padshape]") {
+    Document doc;
+    doc.addBlock("CUSTFP", {});
+    BlockDefinition* block = doc.findBlock("CUSTFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::Custom;
+    // A right triangle, area = 0.5*base*height = 0.5*4*3 = 6 -- nothing to
+    // do with width/height (2.0/1.0 here), proving the outline (not the
+    // box dimensions) drives the real geometry for Custom.
+    pad.width = 2.0;
+    pad.height = 1.0;
+    pad.customOutline = {Point2D(0, 0), Point2D(4, 0), Point2D(0, 3)};
+    block->pads.push_back(pad);
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0)));
+
+    Board3DParams params;
+    params.boardThickness = 1.6;
+    params.copperThickness = 0.035;
+    const Board3DShapes shapes = buildBoard3D(doc, {}, {}, params);
+    REQUIRE(shapes.copper.size() == 1);
+    REQUIRE_FALSE(shapes.copper[0].IsNull());
+    REQUIRE(volumeOf(shapes.copper[0]) == Approx(6.0 * params.copperThickness).margin(1e-6));
+}
+
+TEST_CASE("buildBoard3D falls a degenerate Custom pad (fewer than 3 outline points) back to a plain Rect box",
+         "[core3d][board3d][padshape]") {
+    Document doc;
+    doc.addBlock("CUSTFP2", {});
+    BlockDefinition* block = doc.findBlock("CUSTFP2");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::Custom;
+    pad.width = 3.0;
+    pad.height = 2.0;
+    // customOutline left empty -- never populated, e.g. a "custom" token
+    // read with no primitives.
+    block->pads.push_back(pad);
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0)));
+
+    Board3DParams params;
+    params.boardThickness = 1.6;
+    params.copperThickness = 0.035;
+    const Board3DShapes shapes = buildBoard3D(doc, {}, {}, params);
+    REQUIRE(shapes.copper.size() == 1);
+    REQUIRE_FALSE(shapes.copper[0].IsNull());
+    REQUIRE(volumeOf(shapes.copper[0]) == Approx(3.0 * 2.0 * params.copperThickness).margin(1e-6));
+}
+
 TEST_CASE("buildBoard3D builds a Trapezoid pad's real solid with the exact expected volume (area is delta-invariant)",
          "[core3d][board3d][padshape]") {
     Document doc;

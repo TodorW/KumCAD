@@ -133,6 +133,41 @@ TEST_CASE("writeKiCadMod/readKiCadMod round-trip RoundRect and Trapezoid pad sha
     std::remove(path.c_str());
 }
 
+TEST_CASE("writeKiCadMod/readKiCadMod round-trip a Custom pad's real gr_poly outline", "[io][kicad][footprint][padshape]") {
+    Document doc;
+    doc.addBlock("CUSTFP", {});
+    BlockDefinition* block = doc.findBlock("CUSTFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::Custom;
+    pad.position = Point2D(0, 0);
+    pad.customOutline = {Point2D(-1, -0.5), Point2D(1, -0.5), Point2D(1, 0.5), Point2D(-1, 0.5)};
+    block->pads.push_back(pad);
+
+    const std::string path = "/tmp/kumcad_kicadmod_custom_pad_roundtrip_test.kicad_mod";
+    std::string err;
+    REQUIRE(writeKiCadMod(doc, *block, path, &err));
+
+    std::ifstream in(path);
+    std::ostringstream contents;
+    contents << in.rdbuf();
+    REQUIRE(contents.str().find("custom") != std::string::npos);
+    REQUIRE(contents.str().find("gr_poly") != std::string::npos);
+    REQUIRE(contents.str().find("primitives") != std::string::npos);
+
+    Document doc2;
+    const BlockDefinition* readBack = readKiCadMod(doc2, path, &err);
+    REQUIRE(readBack != nullptr);
+    REQUIRE(readBack->pads.size() == 1);
+    REQUIRE(readBack->pads[0].shape == PadShape::Custom);
+    REQUIRE(readBack->pads[0].customOutline.size() == 4);
+    REQUIRE(readBack->pads[0].customOutline[0].x == Approx(-1.0));
+    REQUIRE(readBack->pads[0].customOutline[0].y == Approx(-0.5));
+    REQUIRE(readBack->pads[0].customOutline[2].x == Approx(1.0));
+    REQUIRE(readBack->pads[0].customOutline[2].y == Approx(0.5));
+    std::remove(path.c_str());
+}
+
 TEST_CASE("readKiCadMod reports an error for a missing or malformed file", "[io][kicad][footprint]") {
     Document doc;
     std::string err;

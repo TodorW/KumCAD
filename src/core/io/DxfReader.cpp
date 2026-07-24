@@ -234,6 +234,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double curBlockPendingPadWidth = 0.0;
     double curBlockPendingPadHeight = 0.0;
     double curBlockPendingPadShapeParam = 0.0;
+    std::vector<Point2D> curBlockPendingPadCustomOutline; // groups 101/102 pairs, cleared at each pad's own 63
+    double curBlockPendingPadCustomX = 0.0;
     std::vector<std::unique_ptr<Entity>> curBlockEntities;
     int curPaperIndex = -1; // >= 0 while inside a *Paper_Space block
 
@@ -1052,6 +1054,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curBlockPins.push_back(pin);
             } else if (g.code == 63) {
                 curBlockPendingPadNumber = g.value;
+                curBlockPendingPadCustomOutline.clear(); // start of a new pad record
             } else if (g.code == 72) {
                 curBlockPendingPadShape = toInt(g.value, 0);
             } else if (g.code == 95) {
@@ -1064,6 +1067,10 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curBlockPendingPadHeight = toDouble(g.value);
             } else if (g.code == 100) {
                 curBlockPendingPadShapeParam = toDouble(g.value);
+            } else if (g.code == 101) {
+                curBlockPendingPadCustomX = toDouble(g.value);
+            } else if (g.code == 102) {
+                curBlockPendingPadCustomOutline.emplace_back(curBlockPendingPadCustomX, toDouble(g.value));
             } else if (g.code == 99) {
                 Pad pad;
                 pad.number = curBlockPendingPadNumber;
@@ -1072,6 +1079,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 pad.width = curBlockPendingPadWidth;
                 pad.height = curBlockPendingPadHeight;
                 pad.shapeParam = curBlockPendingPadShapeParam;
+                pad.customOutline = curBlockPendingPadCustomOutline;
                 pad.drillDiameter = toDouble(g.value);
                 curBlockPads.push_back(pad);
             }

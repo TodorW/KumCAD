@@ -1530,6 +1530,9 @@ TEST_CASE("DXF round-trips PCB footprint pads, tracks, and vias", "[dxf][pcb]") 
     lcad::Pad trapezoid{"4", lcad::PadShape::Trapezoid, lcad::Point2D(30, 0), 2.0, 1.0, 0.0};
     trapezoid.shapeParam = 0.4;
     block->pads.push_back(trapezoid);
+    lcad::Pad custom{"5", lcad::PadShape::Custom, lcad::Point2D(40, 0), 2.0, 1.0, 0.0};
+    custom.customOutline = {lcad::Point2D(-1, -1), lcad::Point2D(1, -1), lcad::Point2D(1, 1), lcad::Point2D(-1, 1)};
+    block->pads.push_back(custom);
 
     doc.addEntity(std::make_unique<lcad::InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block,
                                                         lcad::Point2D(0, 0)));
@@ -1546,7 +1549,7 @@ TEST_CASE("DXF round-trips PCB footprint pads, tracks, and vias", "[dxf][pcb]") 
     const lcad::BlockDefinition* loadedBlock = loaded.findBlock("R_FP");
     REQUIRE(loadedBlock);
     REQUIRE(loadedBlock->isFootprint());
-    REQUIRE(loadedBlock->pads.size() == 4);
+    REQUIRE(loadedBlock->pads.size() == 5);
     REQUIRE(loadedBlock->pads[0].number == "1");
     REQUIRE(loadedBlock->pads[0].shape == lcad::PadShape::Rect);
     REQUIRE(loadedBlock->pads[1].shape == lcad::PadShape::Round);
@@ -1555,6 +1558,10 @@ TEST_CASE("DXF round-trips PCB footprint pads, tracks, and vias", "[dxf][pcb]") 
     REQUIRE(loadedBlock->pads[2].shapeParam == Approx(0.25));
     REQUIRE(loadedBlock->pads[3].shape == lcad::PadShape::Trapezoid);
     REQUIRE(loadedBlock->pads[3].shapeParam == Approx(0.4));
+    REQUIRE(loadedBlock->pads[4].shape == lcad::PadShape::Custom);
+    REQUIRE(loadedBlock->pads[4].customOutline.size() == 4);
+    REQUIRE(loadedBlock->pads[4].customOutline[2].x == Approx(1.0));
+    REQUIRE(loadedBlock->pads[4].customOutline[2].y == Approx(1.0));
 
     bool foundTrack = false, foundVia = false;
     for (const lcad::Entity* e : loaded.entities()) {

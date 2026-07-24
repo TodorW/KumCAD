@@ -100,10 +100,13 @@ struct Pin {
 };
 
 // A PCB footprint pad's shape. RoundRect and Trapezoid use Pad::shapeParam
-// (see below) for their one extra shape parameter; Custom (arbitrary
-// polygon pads, real KiCad's "custom" shape) is a real, disclosed gap --
-// out of scope here, unlike these two.
-enum class PadShape { Round, Rect, Oval, RoundRect, Trapezoid };
+// (see below) for their one extra shape parameter; Custom uses
+// Pad::customOutline instead. A degenerate Custom pad (customOutline under
+// 3 points -- never set, or from a source that only wrote the "custom"
+// token without any primitives) falls back to a plain Rect box everywhere
+// this codebase handles PadShape, the same graceful-degradation convention
+// Rect itself already is for Oval.
+enum class PadShape { Round, Rect, Oval, RoundRect, Trapezoid, Custom };
 
 // One copper connection point on a PCB footprint. number matches the
 // schematic symbol pin number it corresponds to (by convention, like real
@@ -117,6 +120,19 @@ enum class PadShape { Round, Rect, Oval, RoundRect, Trapezoid };
 // InsertEntity's own layer) -- real KiCad's own SMD-vs-THT distinction,
 // derived here rather than stored twice.
 struct Pad {
+    // Every existing Pad{...} call site (~50 of them, across footprint
+    // generation, symbol libraries, and tests) predates shapeParam and
+    // customOutline and positionally initializes only the first 6 members --
+    // a user-declared constructor (rather than leaving Pad an aggregate)
+    // means those trailing two, one of them non-trivial (customOutline),
+    // can stay implicit at every one of those call sites without
+    // -Wmissing-field-initializers flagging each of them individually.
+    Pad() = default;
+    Pad(std::string number_, PadShape shape_, Point2D position_, double width_ = 1.6, double height_ = 1.6,
+       double drillDiameter_ = 0.0, double shapeParam_ = 0.0, std::vector<Point2D> customOutline_ = {})
+        : number(std::move(number_)), shape(shape_), position(position_), width(width_), height(height_),
+          drillDiameter(drillDiameter_), shapeParam(shapeParam_), customOutline(std::move(customOutline_)) {}
+
     std::string number;
     PadShape shape = PadShape::Round;
     Point2D position;
@@ -132,6 +148,15 @@ struct Pad {
     //              rect_delta.x convention (this codebase doesn't model
     //              the independent Y-axis delta KiCad also offers).
     double shapeParam = 0.0;
+    // Custom shape only: the pad's real copper outline, in pad-local space
+    // (centered on position, unrotated -- same convention every consumer
+    // already uses for RoundRect/Trapezoid's derived outlines). Empty for
+    // every other shape. Real KiCad allows a custom pad's primitives to mix
+    // polygons/lines/arcs/circles/rects; this codebase only models a single
+    // polygon primitive (real KiCad's own "gr_poly"), which covers the
+    // overwhelming majority of real custom pads (anything drawn with
+    // KiCad's own polygon pad editor) -- a real, disclosed scope limit.
+    std::vector<Point2D> customOutline;
 };
 
 // A reusable group of entities (an AutoCAD block definition). Child geometry

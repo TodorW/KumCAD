@@ -54,6 +54,7 @@ std::string padShapeToken(PadShape shape) {
         case PadShape::Oval: return "oval";
         case PadShape::RoundRect: return "roundrect";
         case PadShape::Trapezoid: return "trapezoid";
+        case PadShape::Custom: return "custom";
     }
     return "circle";
 }
@@ -61,7 +62,8 @@ std::string padShapeToken(PadShape shape) {
 PadShape padShapeFromToken(const std::string& tok) {
     if (tok == "roundrect") return PadShape::RoundRect;
     if (tok == "trapezoid") return PadShape::Trapezoid;
-    if (tok == "rect" || tok == "custom") return PadShape::Rect; // custom (arbitrary polygon) isn't modeled -- its bounding rect is the closest real shape here
+    if (tok == "custom") return PadShape::Custom;
+    if (tok == "rect") return PadShape::Rect;
     if (tok == "oval") return PadShape::Oval;
     return PadShape::Round;
 }
@@ -84,6 +86,19 @@ SExpr makePadExpr(const Pad& pad) {
         rest.push_back(SExpr::list("roundrect_rratio", {SExpr::num(pad.shapeParam)}));
     } else if (pad.shape == PadShape::Trapezoid) {
         rest.push_back(SExpr::list("rect_delta", {SExpr::num(pad.shapeParam), SExpr::num(0.0)}));
+    } else if (pad.shape == PadShape::Custom && pad.customOutline.size() >= 3) {
+        // Real KiCad custom-pad format: "size" above is the small anchor
+        // pad (fixed to a rect anchor here -- a real, disclosed
+        // simplification, this codebase doesn't expose a per-pad anchor
+        // shape choice), and the actual copper is one or more primitives.
+        // This codebase only ever writes a single gr_poly primitive (see
+        // Pad::customOutline's own comment on scope).
+        std::vector<SExpr> xyItems;
+        for (const Point2D& p : pad.customOutline) xyItems.push_back(SExpr::list("xy", {SExpr::num(p.x), SExpr::num(p.y)}));
+        SExpr grPoly = SExpr::list("gr_poly", {SExpr::list("pts", std::move(xyItems)), SExpr::list("width", {SExpr::num(0.0)})});
+        rest.push_back(SExpr::list("options", {SExpr::list("clearance", {SExpr::sym("outline")}),
+                                               SExpr::list("anchor", {SExpr::sym("rect")})}));
+        rest.push_back(SExpr::list("primitives", {std::move(grPoly)}));
     }
     return SExpr::list("pad", std::move(rest));
 }
@@ -105,6 +120,19 @@ Pad readPad(const SExpr& padExpr) {
         if (const SExpr* ratio = padExpr.child("roundrect_rratio")) pad.shapeParam = ratio->numberAt(0, 0.0);
     } else if (pad.shape == PadShape::Trapezoid) {
         if (const SExpr* delta = padExpr.child("rect_delta")) pad.shapeParam = delta->numberAt(0, 0.0);
+    } else if (pad.shape == PadShape::Custom) {
+        // Only the first gr_poly primitive is read (see makePadExpr's own
+        // comment) -- any gr_line/gr_circle/gr_rect/gr_arc primitive, or a
+        // second polygon, is silently skipped rather than modeled.
+        if (const SExpr* primitives = padExpr.child("primitives")) {
+            if (const SExpr* grPoly = primitives->child("gr_poly")) {
+                if (const SExpr* pts = grPoly->child("pts")) {
+                    for (const SExpr* xy : pts->children("xy")) {
+                        pad.customOutline.emplace_back(xy->numberAt(0), xy->numberAt(1));
+                    }
+                }
+            }
+        }
     }
     return pad;
 }

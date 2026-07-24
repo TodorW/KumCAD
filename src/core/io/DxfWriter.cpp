@@ -1038,6 +1038,10 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
                 writeGroup(out, 97, pad.width);
                 writeGroup(out, 98, pad.height);
                 writeGroup(out, 100, pad.shapeParam);
+                for (const Point2D& p : pad.customOutline) {
+                    writeGroup(out, 101, p.x);
+                    writeGroup(out, 102, p.y);
+                }
                 writeGroup(out, 99, pad.drillDiameter);
             }
             for (const auto& child : block->entities) writeEntity(out, document, *child);

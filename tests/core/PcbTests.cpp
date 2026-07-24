@@ -385,6 +385,30 @@ TEST_CASE("writeGerberLayer emits a real aperture macro (RS-274X primitive 4, Ou
     REQUIRE(text.find("D03*") != std::string::npos);
 }
 
+TEST_CASE("writeGerberLayer emits a real aperture macro built from a Custom pad's own outline",
+         "[pcb][gerber][padshape]") {
+    TempPath temp;
+    Document doc;
+    doc.addBlock("CUSTFP", {});
+    BlockDefinition* block = doc.findBlock("CUSTFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::Custom;
+    pad.customOutline = {Point2D(-1, -1), Point2D(1, -1), Point2D(1, 1), Point2D(-1, 1)};
+    block->pads.push_back(pad);
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0));
+    insert->setAttribute("REFDES", "U1");
+    doc.addEntity(std::move(insert));
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string()));
+    const std::string text = readFile(temp.path);
+
+    REQUIRE(text.find("%AMCUSTOM") != std::string::npos);
+    REQUIRE(text.find("4,1,4,") != std::string::npos); // 4-vertex outline
+    REQUIRE(text.find("D03*") != std::string::npos);
+}
+
 TEST_CASE("writeGerberLayer emits real Gerber X2 file attributes with FileFunction inferred from the layer name",
          "[pcb][gerber]") {
     TempPath temp;

@@ -625,6 +625,14 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
                     painter.drawPolygon(poly);
                     break;
                 }
+                case lcad::PadShape::Custom:
+                    if (pad.customOutline.size() >= 3) {
+                        QPolygonF poly;
+                        for (const lcad::Point2D& p : pad.customOutline) poly << toScreen(padWorld.position + p);
+                        painter.drawPolygon(poly);
+                        break;
+                    }
+                    [[fallthrough]]; // degenerate custom pad: fall back to the plain rect below
                 case lcad::PadShape::Rect:
                 case lcad::PadShape::Oval: {
                     const QPointF s = toScreen(padWorld.position);

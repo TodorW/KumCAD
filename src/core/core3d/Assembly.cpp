@@ -168,6 +168,52 @@ std::vector<PartsListEntry> buildPartsList(const Assembly& assembly) {
     return entries;
 }
 
+std::vector<int> patternComponent(Assembly& assembly, int sourceIndex, const ComponentPatternParams& params) {
+    std::vector<int> added;
+    const auto& components = assembly.components();
+    if (sourceIndex < 0 || sourceIndex >= static_cast<int>(components.size()) || params.count < 2) return added;
+
+    const AssemblyComponent source = components[static_cast<std::size_t>(sourceIndex)]; // copy: addComponent below may reallocate the vector
+
+    if (params.kind == ComponentPatternKind::Linear) {
+        const double dirMag = std::sqrt(params.dirX * params.dirX + params.dirY * params.dirY + params.dirZ * params.dirZ);
+        if (dirMag < 1e-9) return added;
+        for (int i = 1; i < params.count; ++i) {
+            const gp_Vec step(params.dirX / dirMag * params.spacing * i, params.dirY / dirMag * params.spacing * i,
+                              params.dirZ / dirMag * params.spacing * i);
+            gp_Trsf trsf;
+            trsf.SetTranslation(step);
+
+            AssemblyComponent copy = source;
+            copy.name = source.name + " (" + std::to_string(i + 1) + ")";
+            copy.fixed = true;
+            copy.placement = trsf.Multiplied(source.placement);
+            added.push_back(assembly.addComponent(std::move(copy)));
+        }
+    } else {
+        const double axisMag = std::sqrt(params.axisX * params.axisX + params.axisY * params.axisY + params.axisZ * params.axisZ);
+        if (axisMag < 1e-9) return added;
+        const gp_Ax1 axis(gp_Pnt(params.originX, params.originY, params.originZ),
+                          gp_Dir(params.axisX / axisMag, params.axisY / axisMag, params.axisZ / axisMag));
+        // totalAngle/count (not Document3D's own PolarPattern's
+        // totalAngle/(count-1)) -- see ComponentPatternParams' own
+        // comment on why a whole-component pattern deliberately uses a
+        // different, real-AutoCAD-ARRAYPOLAR-matching convention here.
+        const double angleStep = (params.totalAngleDegrees * M_PI / 180.0) / static_cast<double>(params.count);
+        for (int i = 1; i < params.count; ++i) {
+            gp_Trsf trsf;
+            trsf.SetRotation(axis, angleStep * i);
+
+            AssemblyComponent copy = source;
+            copy.name = source.name + " (" + std::to_string(i + 1) + ")";
+            copy.fixed = true;
+            copy.placement = trsf.Multiplied(source.placement);
+            added.push_back(assembly.addComponent(std::move(copy)));
+        }
+    }
+    return added;
+}
+
 std::vector<TopoDS_Shape> assemblyPlacedShapes(const Assembly& assembly) {
     const auto& components = assembly.components();
     std::vector<TopoDS_Shape> placed(components.size());

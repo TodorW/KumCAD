@@ -20,11 +20,14 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QStringList>
 #include <QToolBar>
 
 using lcad::AssemblyComponent;
+using lcad::ComponentPatternKind;
+using lcad::ComponentPatternParams;
 using lcad::Mate;
 using lcad::MateType;
 
@@ -216,6 +219,98 @@ private:
     const std::vector<AssemblyComponent>& m_components;
 };
 
+class PatternComponentDialog : public QDialog {
+public:
+    PatternComponentDialog(const std::vector<AssemblyComponent>& components, QWidget* parent = nullptr)
+        : QDialog(parent) {
+        setWindowTitle(QStringLiteral("Pattern Component"));
+        auto* form = new QFormLayout(this);
+
+        m_source = new QComboBox(this);
+        for (std::size_t i = 0; i < components.size(); ++i) {
+            m_source->addItem(QStringLiteral("[%1] %2").arg(i).arg(QString::fromStdString(components[i].name)),
+                              static_cast<int>(i));
+        }
+        form->addRow(QStringLiteral("Source Component:"), m_source);
+
+        m_kind = new QComboBox(this);
+        m_kind->addItem(QStringLiteral("Linear"), static_cast<int>(ComponentPatternKind::Linear));
+        m_kind->addItem(QStringLiteral("Polar"), static_cast<int>(ComponentPatternKind::Polar));
+        form->addRow(QStringLiteral("Type:"), m_kind);
+
+        m_count = new QSpinBox(this);
+        m_count->setRange(2, 500);
+        m_count->setValue(4);
+        form->addRow(QStringLiteral("Total Instances (including the source):"), m_count);
+
+        m_dirX = makeSpin(1.0);
+        m_dirY = makeSpin(0.0);
+        m_dirZ = makeSpin(0.0);
+        form->addRow(QStringLiteral("Linear Direction X/Y/Z:"), rowOf({m_dirX, m_dirY, m_dirZ}));
+        m_spacing = makeSpin(10.0);
+        form->addRow(QStringLiteral("Linear Spacing:"), m_spacing);
+
+        m_axisX = makeSpin(0.0);
+        m_axisY = makeSpin(0.0);
+        m_axisZ = makeSpin(1.0);
+        form->addRow(QStringLiteral("Polar Axis X/Y/Z:"), rowOf({m_axisX, m_axisY, m_axisZ}));
+        m_originX = makeSpin(0.0);
+        m_originY = makeSpin(0.0);
+        m_originZ = makeSpin(0.0);
+        form->addRow(QStringLiteral("Polar Axis Origin X/Y/Z:"), rowOf({m_originX, m_originY, m_originZ}));
+        m_totalAngle = makeSpin(360.0);
+        form->addRow(QStringLiteral("Polar Total Angle (degrees):"), m_totalAngle);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        form->addRow(buttons);
+    }
+
+    int sourceIndex() const { return m_source->currentData().toInt(); }
+
+    ComponentPatternParams params() const {
+        ComponentPatternParams p;
+        p.kind = static_cast<ComponentPatternKind>(m_kind->currentData().toInt());
+        p.count = m_count->value();
+        p.dirX = m_dirX->value();
+        p.dirY = m_dirY->value();
+        p.dirZ = m_dirZ->value();
+        p.spacing = m_spacing->value();
+        p.axisX = m_axisX->value();
+        p.axisY = m_axisY->value();
+        p.axisZ = m_axisZ->value();
+        p.originX = m_originX->value();
+        p.originY = m_originY->value();
+        p.originZ = m_originZ->value();
+        p.totalAngleDegrees = m_totalAngle->value();
+        return p;
+    }
+
+private:
+    QDoubleSpinBox* makeSpin(double value) {
+        auto* spin = new QDoubleSpinBox(this);
+        spin->setRange(-1e6, 1e6);
+        spin->setDecimals(3);
+        spin->setValue(value);
+        return spin;
+    }
+
+    QWidget* rowOf(std::initializer_list<QWidget*> widgets) {
+        auto* container = new QWidget(this);
+        auto* layout = new QHBoxLayout(container);
+        layout->setContentsMargins(0, 0, 0, 0);
+        for (QWidget* w : widgets) layout->addWidget(w);
+        return container;
+    }
+
+    QComboBox* m_source = nullptr;
+    QComboBox* m_kind = nullptr;
+    QSpinBox* m_count = nullptr;
+    QDoubleSpinBox *m_dirX, *m_dirY, *m_dirZ, *m_spacing;
+    QDoubleSpinBox *m_axisX, *m_axisY, *m_axisZ, *m_originX, *m_originY, *m_originZ, *m_totalAngle;
+};
+
 } // namespace
 
 AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
@@ -238,6 +333,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
     QToolBar* toolbar = addToolBar(QStringLiteral("Assembly"));
     toolbar->addAction(QStringLiteral("Add Component from STEP..."), this, &AssemblyWindow::addComponentFromStep);
     toolbar->addAction(QStringLiteral("Add Mate..."), this, &AssemblyWindow::addMate);
+    toolbar->addAction(QStringLiteral("Pattern Component..."), this, &AssemblyWindow::patternComponentAction);
     toolbar->addAction(QStringLiteral("Solve"), this, &AssemblyWindow::solve);
     toolbar->addAction(QStringLiteral("Check DOF..."), this, &AssemblyWindow::checkDof);
     toolbar->addAction(QStringLiteral("Check Interferences..."), this, &AssemblyWindow::checkInterferences);
@@ -284,6 +380,26 @@ void AssemblyWindow::addMate() {
     if (dialog.exec() != QDialog::Accepted) return;
     m_assembly.addMate(dialog.result());
     refreshMateList();
+}
+
+void AssemblyWindow::patternComponentAction() {
+    if (m_assembly.components().empty()) {
+        statusBar()->showMessage(QStringLiteral("Add a component first"), 3000);
+        return;
+    }
+    PatternComponentDialog dialog(m_assembly.components(), this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const std::vector<int> added = lcad::patternComponent(m_assembly, dialog.sourceIndex(), dialog.params());
+    if (added.empty()) {
+        statusBar()->showMessage(QStringLiteral("Pattern produced no new components -- check the direction/axis "
+                                                "and instance count"),
+                                 4000);
+        return;
+    }
+    refreshComponentList();
+    refreshViewport();
+    statusBar()->showMessage(QStringLiteral("%1 new component(s) added").arg(added.size()), 3000);
 }
 
 void AssemblyWindow::solve() {

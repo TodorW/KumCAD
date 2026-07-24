@@ -643,3 +643,107 @@ TEST_CASE("buildPartsList groups every empty-named component together and return
     REQUIRE(entries[1].name == "Bracket");
     REQUIRE(entries[1].quantity == 1);
 }
+
+TEST_CASE("patternComponent linear-patterns a component, composing each copy's placement onto the source's own",
+         "[core3d][assembly][pattern]") {
+    Assembly asm_;
+    AssemblyComponent bolt;
+    bolt.name = "Bolt";
+    bolt.shape = makeBox(1.0);
+    // The source is already placed away from the origin -- proves the
+    // pattern step composes onto the source's own CURRENT placement,
+    // not the component's raw local shape.
+    bolt.placement.SetTranslationPart(gp_Vec(100.0, 0.0, 0.0));
+    const int sourceIdx = asm_.addComponent(bolt);
+
+    ComponentPatternParams params;
+    params.kind = ComponentPatternKind::Linear;
+    params.count = 4; // source + 3 copies
+    params.dirX = 1.0;
+    params.dirY = 0.0;
+    params.dirZ = 0.0;
+    params.spacing = 10.0;
+    const std::vector<int> added = patternComponent(asm_, sourceIdx, params);
+
+    REQUIRE(added.size() == 3);
+    REQUIRE(asm_.components().size() == 4);
+    for (std::size_t i = 0; i < added.size(); ++i) {
+        const AssemblyComponent& copy = asm_.components()[static_cast<std::size_t>(added[i])];
+        REQUIRE(copy.fixed);
+        REQUIRE(copy.name == "Bolt (" + std::to_string(i + 2) + ")");
+        const gp_Pnt worldOrigin = gp_Pnt(0, 0, 0).Transformed(copy.placement);
+        // Copy i (1-based added index) sits spacing*(i+1) further along X
+        // than the source's own 100.0 -- i.e. 110, 120, 130.
+        REQUIRE(worldOrigin.X() == Approx(100.0 + 10.0 * static_cast<double>(i + 1)).margin(1e-6));
+        REQUIRE(worldOrigin.Y() == Approx(0.0).margin(1e-6));
+    }
+}
+
+TEST_CASE("patternComponent polar-patterns a component evenly around an axis", "[core3d][assembly][pattern]") {
+    Assembly asm_;
+    AssemblyComponent bolt;
+    bolt.name = "Bolt";
+    bolt.shape = makeBox(1.0);
+    bolt.placement.SetTranslationPart(gp_Vec(10.0, 0.0, 0.0)); // 10 units from the Z axis
+    const int sourceIdx = asm_.addComponent(bolt);
+
+    ComponentPatternParams params;
+    params.kind = ComponentPatternKind::Polar;
+    params.count = 4; // source at 0 deg + 3 copies at 90/180/270
+    params.axisX = 0.0;
+    params.axisY = 0.0;
+    params.axisZ = 1.0;
+    params.originX = 0.0;
+    params.originY = 0.0;
+    params.originZ = 0.0;
+    params.totalAngleDegrees = 360.0;
+    const std::vector<int> added = patternComponent(asm_, sourceIdx, params);
+
+    REQUIRE(added.size() == 3);
+    // totalAngle/count (4 instances over 360 degrees = 90 degrees apart)
+    // -- deliberately NOT Document3D's own PolarPattern convention of
+    // totalAngle/(count-1), which would put the 4th copy exactly back on
+    // top of the source for a full 360-degree pattern (see
+    // ComponentPatternParams' own comment on why).
+    const double expectedAngles[3] = {90.0, 180.0, 270.0};
+    for (std::size_t i = 0; i < added.size(); ++i) {
+        const AssemblyComponent& copy = asm_.components()[static_cast<std::size_t>(added[i])];
+        const gp_Pnt worldOrigin = gp_Pnt(0, 0, 0).Transformed(copy.placement);
+        const double angleRad = expectedAngles[i] * M_PI / 180.0;
+        REQUIRE(worldOrigin.X() == Approx(10.0 * std::cos(angleRad)).margin(1e-6));
+        REQUIRE(worldOrigin.Y() == Approx(10.0 * std::sin(angleRad)).margin(1e-6));
+    }
+}
+
+TEST_CASE("patternComponent rejects an out-of-range source, count < 2, or a degenerate direction/axis",
+         "[core3d][assembly][pattern]") {
+    Assembly asm_;
+    AssemblyComponent bolt;
+    bolt.shape = makeBox(1.0);
+    asm_.addComponent(bolt);
+
+    ComponentPatternParams params;
+    params.count = 3;
+    params.dirX = 1.0;
+
+    REQUIRE(patternComponent(asm_, -1, params).empty());
+    REQUIRE(patternComponent(asm_, 5, params).empty());
+
+    ComponentPatternParams tooFew;
+    tooFew.count = 1;
+    REQUIRE(patternComponent(asm_, 0, tooFew).empty());
+
+    ComponentPatternParams zeroDir;
+    zeroDir.count = 3;
+    zeroDir.dirX = zeroDir.dirY = zeroDir.dirZ = 0.0;
+    REQUIRE(patternComponent(asm_, 0, zeroDir).empty());
+
+    ComponentPatternParams zeroAxis;
+    zeroAxis.kind = ComponentPatternKind::Polar;
+    zeroAxis.count = 3;
+    zeroAxis.axisX = zeroAxis.axisY = zeroAxis.axisZ = 0.0;
+    REQUIRE(patternComponent(asm_, 0, zeroAxis).empty());
+
+    // None of the rejected calls actually added anything.
+    REQUIRE(asm_.components().size() == 1);
+}

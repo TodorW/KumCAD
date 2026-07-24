@@ -22,6 +22,7 @@ public:
 private:
     void addComponentFromStep();
     void addMate();
+    void patternComponentAction();
     void solve();
     void checkDof();
     void checkInterferences();

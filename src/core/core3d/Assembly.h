@@ -137,6 +137,48 @@ private:
     std::vector<Mate> m_mates;
 };
 
+// Linear or polar duplication of an existing component -- there was no way
+// to place several identical instances (e.g. "8 bolts around a bolt
+// circle") without importing/mating each one by hand, one at a time.
+enum class ComponentPatternKind { Linear, Polar };
+struct ComponentPatternParams {
+    ComponentPatternKind kind = ComponentPatternKind::Linear;
+    int count = 2; // TOTAL instances including the original (unpatterned) one
+    // Linear: direction (need not be unit) + spacing between consecutive copies.
+    double dirX = 1.0, dirY = 0.0, dirZ = 0.0;
+    double spacing = 10.0;
+    // Polar: axis (need not be unit) through origin, spread evenly across
+    // totalAngleDegrees using totalAngleDegrees/count as the per-copy step
+    // -- deliberately NOT Document3D's own PolarPattern feature convention
+    // (totalAngle/(count-1), which reaches the exact end angle but puts a
+    // full-360-degree pattern's last copy exactly on top of the source).
+    // The dominant real use case for patterning a whole COMPONENT (a bolt
+    // circle, wheel studs) is a full 360-degree spread of evenly-spaced,
+    // non-overlapping instances, matching real AutoCAD's own ARRAYPOLAR
+    // default ("Fill angle 360" / "Item count N" spaces items N ways, not
+    // N-1) -- worth a real, disclosed, deliberate divergence from this
+    // codebase's own solid-feature convention rather than inheriting a
+    // gotcha that matters far more here than it does for a fused solid
+    // copy landing harmlessly on top of itself.
+    double axisX = 0.0, axisY = 0.0, axisZ = 1.0;
+    double originX = 0.0, originY = 0.0, originZ = 0.0;
+    double totalAngleDegrees = 360.0;
+};
+
+// Adds count-1 new components to assembly, each a copy of
+// assembly.components()[sourceIndex] (same shape and name, suffixed
+// " (Ni)") placed at the pattern transform for that copy applied ON TOP
+// OF the source's own CURRENT world placement -- so patterning an already-
+// mated component carries its real placement into every copy, not just
+// its local origin. Each copy is fixed (Assembly::solve() never moves a
+// pattern copy independently -- it's placed directly, the same way a
+// solid LinearPattern/PolarPattern feature's own copies aren't separately
+// re-solved either). Returns the indices of the newly added components
+// (NOT including the original source, still at sourceIndex). Returns
+// empty and adds nothing if sourceIndex is out of range, count < 2, or
+// the pattern direction/axis is degenerate (zero length).
+std::vector<int> patternComponent(Assembly& assembly, int sourceIndex, const ComponentPatternParams& params);
+
 // A bounded diagnostic matching the closed-form solving model above (not
 // a general DOF/redundancy analysis over a constraint graph, which this
 // solver was deliberately never built as -- see MateType's own comment).

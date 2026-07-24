@@ -168,6 +168,107 @@ TEST_CASE("writeKiCadMod/readKiCadMod round-trip a Custom pad's real gr_poly out
     std::remove(path.c_str());
 }
 
+namespace {
+double polygonAreaExact(const std::vector<Point2D>& pts) {
+    double sum = 0.0;
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        const Point2D& a = pts[i];
+        const Point2D& b = pts[(i + 1) % pts.size()];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    return std::abs(sum) / 2.0;
+}
+} // namespace
+
+TEST_CASE("readKiCadMod unions two genuinely overlapping gr_rect primitives into one connected outline",
+         "[io][kicad][footprint][padshape]") {
+    const std::string path = "/tmp/kumcad_kicadmod_custom_pad_rects_test.kicad_mod";
+    {
+        std::ofstream out(path);
+        // rect1 x=[-2,1] y=[-1,1] (area 3*2=6), rect2 x=[-1,2] y=[-2,2]
+        // (area 3*4=12), overlapping on x=[-1,1] y=[-1,1] (area 2*2=4) --
+        // union = 6+12-4 = 14 by inclusion-exclusion. Deliberately offset
+        // in BOTH axes so no edge/vertex of either rect exactly coincides
+        // with the other's (unlike two rects merely touching along a
+        // shared edge, or sharing an identical y-range, both real
+        // degenerate cases for a general polygon clipper's crossing-point
+        // detection -- this is a clean transversal overlap instead).
+        out << R"((footprint "TestFP"
+  (pad "1" smd custom (at 0 0) (size 0.1 0.1) (layers "F.Cu")
+    (options (clearance outline) (anchor rect))
+    (primitives
+      (gr_rect (start -2 -1) (end 1 1) (width 0))
+      (gr_rect (start -1 -2) (end 2 2) (width 0))
+    )
+  )
+))";
+    }
+
+    Document doc;
+    std::string err;
+    const BlockDefinition* block = readKiCadMod(doc, path, &err);
+    REQUIRE(block != nullptr);
+    REQUIRE(block->pads.size() == 1);
+    REQUIRE(block->pads[0].shape == PadShape::Custom);
+    REQUIRE(polygonAreaExact(block->pads[0].customOutline) == Approx(14.0).margin(1e-6));
+    std::remove(path.c_str());
+}
+
+TEST_CASE("readKiCadMod reads a gr_circle primitive as a real tessellated circle outline",
+         "[io][kicad][footprint][padshape]") {
+    const std::string path = "/tmp/kumcad_kicadmod_custom_pad_circle_test.kicad_mod";
+    {
+        std::ofstream out(path);
+        out << R"((footprint "TestFP"
+  (pad "1" smd custom (at 0 0) (size 0.1 0.1) (layers "F.Cu")
+    (options (clearance outline) (anchor rect))
+    (primitives
+      (gr_circle (center 0 0) (end 2 0) (width 0))
+    )
+  )
+))";
+    }
+
+    Document doc;
+    std::string err;
+    const BlockDefinition* block = readKiCadMod(doc, path, &err);
+    REQUIRE(block != nullptr);
+    REQUIRE(block->pads.size() == 1);
+    // end is 2 units from center -- radius 2. Tessellated, so within a
+    // small epsilon of the true circle area, not exact.
+    REQUIRE(polygonAreaExact(block->pads[0].customOutline) == Approx(M_PI * 2.0 * 2.0).epsilon(0.01));
+    std::remove(path.c_str());
+}
+
+TEST_CASE("readKiCadMod unions a gr_poly and a gr_rect primitive that genuinely overlap",
+         "[io][kicad][footprint][padshape]") {
+    const std::string path = "/tmp/kumcad_kicadmod_custom_pad_mixed_test.kicad_mod";
+    {
+        std::ofstream out(path);
+        // gr_poly is a rect x=[-3,1],y=[-1,1] (area 4*2=8); gr_rect is a
+        // rect x=[-1,3],y=[-2,2] (area 4*4=16), offset in BOTH axes from
+        // gr_poly (same non-degenerate-overlap reasoning as the gr_rect/
+        // gr_rect test above) -- overlap on x=[-1,1],y=[-1,1] (area
+        // 2*2=4), union = 8+16-4 = 20 by inclusion-exclusion.
+        out << R"((footprint "TestFP"
+  (pad "1" smd custom (at 0 0) (size 0.1 0.1) (layers "F.Cu")
+    (options (clearance outline) (anchor rect))
+    (primitives
+      (gr_poly (pts (xy -3 -1) (xy 1 -1) (xy 1 1) (xy -3 1)) (width 0))
+      (gr_rect (start -1 -2) (end 3 2) (width 0))
+    )
+  )
+))";
+    }
+
+    Document doc;
+    std::string err;
+    const BlockDefinition* block = readKiCadMod(doc, path, &err);
+    REQUIRE(block != nullptr);
+    REQUIRE(polygonAreaExact(block->pads[0].customOutline) == Approx(20.0).margin(1e-6));
+    std::remove(path.c_str());
+}
+
 TEST_CASE("readKiCadMod reports an error for a missing or malformed file", "[io][kicad][footprint]") {
     Document doc;
     std::string err;

@@ -5,9 +5,11 @@
 #include "core/geometry/Arc.h"
 #include "core/geometry/Circle.h"
 #include "core/geometry/Line.h"
+#include "core/geometry/Region.h"
 #include "core/geometry/Text.h"
 #include "core/io/SExpr.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -103,6 +105,49 @@ SExpr makePadExpr(const Pad& pad) {
     return SExpr::list("pad", std::move(rest));
 }
 
+std::vector<Point2D> rectOutline(const Point2D& start, const Point2D& end) {
+    return {start, Point2D(end.x, start.y), end, Point2D(start.x, end.y)};
+}
+
+std::vector<Point2D> circleOutline(const Point2D& center, double radius, int segments = 32) {
+    std::vector<Point2D> pts;
+    pts.reserve(static_cast<std::size_t>(segments));
+    for (int i = 0; i < segments; ++i) {
+        const double t = 2.0 * kPi * static_cast<double>(i) / segments;
+        pts.emplace_back(center.x + radius * std::cos(t), center.y + radius * std::sin(t));
+    }
+    return pts;
+}
+
+// Real union via the same polygon clipper REGION's own boolean ops use --
+// picks the largest-area resulting loop if the union produces more than
+// one disjoint piece, since Pad::customOutline is a single flat polygon,
+// not a multi-loop shape (a real, disclosed scope limit, the same
+// "largest wins" convention deriveBoardOutline already uses elsewhere for
+// the same single-polygon-representation reason).
+//
+// A real, disclosed limitation confirmed while testing this: two
+// primitives that only TOUCH (share an exact edge or vertex, zero-area
+// overlap) rather than genuinely overlap don't merge into one loop --
+// regionBoolean's own crossing-point detection needs a proper transversal
+// intersection, so an exactly-touching pair comes back as two disjoint
+// loops (picked between by the largest-wins rule above, silently
+// dropping the other) instead of one connected shape. A custom pad whose
+// primitives are drawn with a deliberate small overlap (the common real-
+// world way to build one, precisely to avoid relying on an exact shared
+// edge) is unaffected.
+std::vector<Point2D> unionOutline(const std::vector<Point2D>& a, const std::vector<Point2D>& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    const std::vector<RegionLoop> loops = regionBoolean(a, b, RegionBoolOp::Union);
+    if (loops.empty()) return a; // degenerate/failed union -- keep what we already had
+    return std::max_element(loops.begin(), loops.end(),
+                            [](const RegionLoop& x, const RegionLoop& y) {
+                                return std::abs(x.signedArea()) < std::abs(y.signedArea());
+                            })
+        ->vertices;
+}
+
 Pad readPad(const SExpr& padExpr) {
     Pad pad;
     pad.number = padExpr.textAt(0);
@@ -121,15 +166,34 @@ Pad readPad(const SExpr& padExpr) {
     } else if (pad.shape == PadShape::Trapezoid) {
         if (const SExpr* delta = padExpr.child("rect_delta")) pad.shapeParam = delta->numberAt(0, 0.0);
     } else if (pad.shape == PadShape::Custom) {
-        // Only the first gr_poly primitive is read (see makePadExpr's own
-        // comment) -- any gr_line/gr_circle/gr_rect/gr_arc primitive, or a
-        // second polygon, is silently skipped rather than modeled.
+        // Real KiCad allows several primitives (gr_poly/gr_rect/gr_circle/
+        // gr_line/gr_arc) whose union forms one custom pad's copper --
+        // gr_poly/gr_rect/gr_circle are modeled here (the overwhelming
+        // majority of real custom pads use one or a mix of these three),
+        // each unioned into pad.customOutline in document order via the
+        // same real polygon-boolean union REGION's own UNION uses. A
+        // gr_line/gr_arc primitive is still skipped -- a real, disclosed
+        // remaining gap: a stroked line/arc needs its own width-to-outline
+        // conversion this doesn't do.
         if (const SExpr* primitives = padExpr.child("primitives")) {
-            if (const SExpr* grPoly = primitives->child("gr_poly")) {
+            for (const SExpr* grPoly : primitives->children("gr_poly")) {
+                std::vector<Point2D> poly;
                 if (const SExpr* pts = grPoly->child("pts")) {
-                    for (const SExpr* xy : pts->children("xy")) {
-                        pad.customOutline.emplace_back(xy->numberAt(0), xy->numberAt(1));
-                    }
+                    for (const SExpr* xy : pts->children("xy")) poly.emplace_back(xy->numberAt(0), xy->numberAt(1));
+                }
+                pad.customOutline = unionOutline(pad.customOutline, poly);
+            }
+            for (const SExpr* grRect : primitives->children("gr_rect")) {
+                const SExpr* start = grRect->child("start");
+                const SExpr* end = grRect->child("end");
+                if (start && end) pad.customOutline = unionOutline(pad.customOutline, rectOutline(readXY(*start), readXY(*end)));
+            }
+            for (const SExpr* grCircle : primitives->children("gr_circle")) {
+                const SExpr* center = grCircle->child("center");
+                const SExpr* end = grCircle->child("end");
+                if (center && end) {
+                    const Point2D c = readXY(*center);
+                    pad.customOutline = unionOutline(pad.customOutline, circleOutline(c, c.distanceTo(readXY(*end))));
                 }
             }
         }

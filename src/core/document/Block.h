@@ -152,10 +152,16 @@ struct Pad {
     // (centered on position, unrotated -- same convention every consumer
     // already uses for RoundRect/Trapezoid's derived outlines). Empty for
     // every other shape. Real KiCad allows a custom pad's primitives to mix
-    // polygons/lines/arcs/circles/rects; this codebase only models a single
-    // polygon primitive (real KiCad's own "gr_poly"), which covers the
-    // overwhelming majority of real custom pads (anything drawn with
-    // KiCad's own polygon pad editor) -- a real, disclosed scope limit.
+    // polygons/lines/arcs/circles/rects; KiCadMod's own reader unions
+    // gr_poly/gr_rect/gr_circle primitives (in whatever combination the
+    // file has) into this single flattened polygon via a real polygon
+    // boolean union (see core/geometry/Region.h's regionBoolean) -- the
+    // overwhelming majority of real custom pads use one or a mix of these
+    // three. gr_line/gr_arc primitives are still skipped (stroked
+    // geometry needs its own width-to-outline conversion), and if a union
+    // ever produces disjoint pieces the largest by area wins, since this
+    // is a single polygon, not a multi-loop shape -- both real, disclosed
+    // remaining scope limits.
     std::vector<Point2D> customOutline;
 };
 

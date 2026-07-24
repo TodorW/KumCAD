@@ -470,7 +470,14 @@ public:
         for (EntityId id : m_layout.entityIds) {
             if (auto entity = m_document.removeEntity(id)) m_removedEntities.push_back(std::move(entity));
         }
-        m_document.layouts().erase(m_document.layouts().begin() + m_index);
+        // removeEntity() above already took every entity out of
+        // m_entityMap (undo-safely, unlike removeLayout()'s own entity
+        // erasure) -- calling removeLayout() now to actually drop the
+        // layout is a safe no-op on those already-gone ids, and picks up
+        // its real activeSpace fixup (if the deleted layout was the
+        // active space, m_activeSpace resets to model space) that hand-
+        // erasing the layouts vector directly here used to skip entirely.
+        m_document.removeLayout(m_index);
     }
     void undo() override {
         m_document.layouts().insert(m_document.layouts().begin() + m_index, m_layout);

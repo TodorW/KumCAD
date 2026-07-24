@@ -243,3 +243,25 @@ TEST_CASE("DeleteLayoutCommand undo restores the layout and its entities", "[com
     REQUIRE(doc.layouts().size() == 1);
     REQUIRE(doc.findEntity(id) == nullptr);
 }
+
+TEST_CASE("DeleteLayoutCommand resets activeSpace when the deleted layout was the active one",
+         "[commands][layout]") {
+    // Deleting the CURRENTLY active layout used to leave Document's own
+    // m_activeSpace pointing at a now out-of-range index (execute() hand-
+    // erased the layouts vector directly instead of calling the real
+    // removeLayout(), which is the only place that index actually gets
+    // fixed up) -- a real bug real Document::addEntity guards against
+    // crashing on, but which would still misattribute/drop new entities
+    // rather than routing them to model space like real AutoCAD does
+    // once the sheet you were on is gone.
+    lcad::Document doc;
+    lcad::Layout second;
+    second.name = "Sheet 2";
+    doc.layouts().push_back(second);
+    doc.setActiveSpace(1);
+    REQUIRE(doc.activeSpace() == 1);
+
+    doc.commandStack().execute(std::make_unique<lcad::DeleteLayoutCommand>(doc, 1));
+    REQUIRE(doc.layouts().size() == 1);
+    REQUIRE(doc.activeSpace() == -1); // back to model space, not a dangling index into a 1-element vector
+}

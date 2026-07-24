@@ -678,9 +678,9 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         const std::string fileName = m_documentFileName.toStdString();
         for (lcad::Entity* e : m_document.entities()) {
             if (e->type() == lcad::EntityType::Text) {
-                auto* text = static_cast<lcad::TextEntity*>(e);
-                if (text->fieldTemplate().empty()) continue;
-                text->setText(lcad::evaluateFieldTemplate(m_document, text->fieldTemplate(), fileName));
+                auto* textEntity = static_cast<lcad::TextEntity*>(e);
+                if (textEntity->fieldTemplate().empty()) continue;
+                textEntity->setText(lcad::evaluateFieldTemplate(m_document, textEntity->fieldTemplate(), fileName));
                 ++updated;
             } else if (e->type() == lcad::EntityType::MText) {
                 auto* mtext = static_cast<lcad::MTextEntity*>(e);

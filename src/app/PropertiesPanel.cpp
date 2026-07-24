@@ -595,10 +595,10 @@ void PropertiesPanel::applyColor(std::optional<lcad::Color> color) {
 
 void PropertiesPanel::onColorComboChanged(int index) {
     if (m_updating || index < 0) return;
-    const int data = m_colorCombo->itemData(index).toInt();
-    if (data == kByLayerData) {
+    const int colorData = m_colorCombo->itemData(index).toInt();
+    if (colorData == kByLayerData) {
         applyColor(std::nullopt);
-    } else if (data == kCustomData) {
+    } else if (colorData == kCustomData) {
         const QColor picked = QColorDialog::getColor(Qt::white, this, QStringLiteral("Entity Color"));
         if (picked.isValid()) {
             applyColor(lcad::Color{static_cast<std::uint8_t>(picked.red()), static_cast<std::uint8_t>(picked.green()),
@@ -607,7 +607,7 @@ void PropertiesPanel::onColorComboChanged(int index) {
             refresh(); // dialog cancelled: restore the combo to reality
         }
     } else {
-        applyColor(unpackColor(data));
+        applyColor(unpackColor(colorData));
     }
 }
 

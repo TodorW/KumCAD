@@ -172,11 +172,45 @@ TEST_CASE("deriveKeepoutZones reads Keepout.NoPour/Keepout.NoRoute as pour-only/
         if (zone.blocksCopperPour && zone.blocksAutorouting) ++foundBoth;
         else if (zone.blocksCopperPour && !zone.blocksAutorouting) ++foundPourOnly;
         else if (!zone.blocksCopperPour && zone.blocksAutorouting) ++foundRouteOnly;
-        REQUIRE_FALSE(zone.layer.has_value()); // still no per-zone single-layer restriction this way
+        REQUIRE_FALSE(zone.layer.has_value()); // none of these 3 restrict to a single layer
     }
     REQUIRE(foundBoth == 1);
     REQUIRE(foundPourOnly == 1);
     REQUIRE(foundRouteOnly == 1);
+}
+
+TEST_CASE("deriveKeepoutZones reads Keepout.<LayerName> as a single-layer restriction",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    const LayerId fCu = doc.addLayer("F.Cu", Color{200, 100, 0});
+    const LayerId bCu = doc.addLayer("B.Cu", Color{0, 100, 200});
+
+    const LayerId fCuKeepout = doc.addLayer("Keepout.F.Cu", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), fCuKeepout, std::vector<Point2D>{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, true));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 1);
+    REQUIRE(zones[0].blocksCopperPour);
+    REQUIRE(zones[0].blocksAutorouting);
+    REQUIRE(zones[0].layer.has_value());
+    REQUIRE(*zones[0].layer == fCu);
+
+    REQUIRE(pointInKeepout(Point2D(5, 5), fCu, zones, /*forPour=*/true));
+    REQUIRE_FALSE(pointInKeepout(Point2D(5, 5), bCu, zones, /*forPour=*/true)); // restricted to F.Cu only
+}
+
+TEST_CASE("deriveKeepoutZones ignores a Keepout.<suffix> layer whose suffix isn't a real layer name",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    // "Widgets" isn't the name of any layer in the document -- not a
+    // recognized keepout convention, so it's silently ignored rather
+    // than misinterpreted.
+    const LayerId unrecognized = doc.addLayer("Keepout.Widgets", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), unrecognized, std::vector<Point2D>{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, true));
+
+    REQUIRE(deriveKeepoutZones(doc).empty());
 }
 
 TEST_CASE("deriveKeepoutZones chains a mixed line+arc loop the same way deriveBoardOutline does",

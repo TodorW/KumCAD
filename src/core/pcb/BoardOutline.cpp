@@ -200,29 +200,43 @@ std::vector<Point2D> deriveBoardOutline(const Document& doc, const std::string& 
 
 std::vector<KeepoutZone> deriveKeepoutZones(const Document& doc, const std::string& layerName, double chainTolerance) {
     std::vector<KeepoutZone> zones;
-    // layerName itself blocks both (real KiCad's default keepout area);
-    // the two reserved suffixes below let a zone restrict itself to just
-    // one restriction, matching real KiCad's own separate "no copper
-    // pour"/"no tracks or vias" checkboxes -- still no single-layer
-    // restriction exposed this way (see this function's own header
-    // comment), only the pour/route split.
-    struct Suffix {
-        std::string name;
-        bool blocksCopperPour;
-        bool blocksAutorouting;
-    };
-    const Suffix suffixes[] = {
-        {layerName, true, true},
-        {layerName + ".NoPour", true, false},
-        {layerName + ".NoRoute", false, true},
-    };
-    for (const Suffix& suffix : suffixes) {
-        for (auto& loop : deriveAllClosedLoops(doc, suffix.name, chainTolerance)) {
+    const auto addZonesFrom = [&](const std::string& drawLayerName, bool blocksPour, bool blocksRoute,
+                                  std::optional<LayerId> restrictLayer) {
+        for (auto& loop : deriveAllClosedLoops(doc, drawLayerName, chainTolerance)) {
             KeepoutZone zone;
             zone.polygon = std::move(loop);
-            zone.blocksCopperPour = suffix.blocksCopperPour;
-            zone.blocksAutorouting = suffix.blocksAutorouting;
+            zone.blocksCopperPour = blocksPour;
+            zone.blocksAutorouting = blocksRoute;
+            zone.layer = restrictLayer;
             zones.push_back(std::move(zone));
+        }
+    };
+
+    // layerName itself blocks both, on every layer (real KiCad's default
+    // keepout area); the two reserved suffixes below restrict a zone to
+    // just one restriction, matching real KiCad's own separate "no copper
+    // pour"/"no tracks or vias" checkboxes.
+    addZonesFrom(layerName, true, true, std::nullopt);
+    addZonesFrom(layerName + ".NoPour", true, false, std::nullopt);
+    addZonesFrom(layerName + ".NoRoute", false, true, std::nullopt);
+
+    // layerName + "." + <any other real layer's own name> restricts a
+    // zone to that one copper layer instead of every layer -- the last
+    // piece of real KiCad's own keepout area dialog this drawing-based
+    // convention now covers. Blocks both pour and routing on that single
+    // layer; combining a single-layer restriction WITH the pour-only/
+    // route-only split (e.g. "Keepout.F.Cu.NoPour") isn't modeled -- a
+    // real, disclosed remaining scope limit.
+    const std::string prefix = layerName + ".";
+    for (const Layer& candidateLayer : doc.layers()) {
+        if (candidateLayer.name.rfind(prefix, 0) != 0) continue;
+        const std::string suffix = candidateLayer.name.substr(prefix.size());
+        if (suffix == "NoPour" || suffix == "NoRoute") continue; // already handled above
+        for (const Layer& restrictTo : doc.layers()) {
+            if (restrictTo.name == suffix) {
+                addZonesFrom(candidateLayer.name, true, true, restrictTo.id);
+                break;
+            }
         }
     }
     return zones;

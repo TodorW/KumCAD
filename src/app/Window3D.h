@@ -58,6 +58,13 @@ private:
     // Sprint 5: opens a separate top-level Assembly window.
     void openAssemblyWindow();
 
+    // Every Document3D tip shape, plus one combined shape for the whole BIM
+    // model appended if it has any geometry (see combinedBimShape) --
+    // shared by generateDrawingViews (projected) and exportStepFile/
+    // exportIgesFile (written directly) so a BIM building is included in
+    // both instead of neither.
+    std::vector<TopoDS_Shape> exportableTipShapes() const;
+
     // Phase 3.1: projects Front/Top/Right/Iso views of the document's tip
     // shapes into a new 2D drawing.
     void generateDrawingViews();

@@ -30,13 +30,21 @@ std::vector<int> tipFeatureIndices(const Document3D& doc) {
 } // namespace
 
 bool writeStep(const Document3D& doc, const std::string& path) {
-    const std::vector<int> tips = tipFeatureIndices(doc);
-    if (tips.empty()) return false;
+    std::vector<TopoDS_Shape> shapes;
+    for (int index : tipFeatureIndices(doc)) shapes.push_back(doc.shapeAt(index));
+    return writeStep(shapes, path);
+}
 
+bool writeIges(const Document3D& doc, const std::string& path) {
+    std::vector<TopoDS_Shape> shapes;
+    for (int index : tipFeatureIndices(doc)) shapes.push_back(doc.shapeAt(index));
+    return writeIges(shapes, path);
+}
+
+bool writeStep(const std::vector<TopoDS_Shape>& shapes, const std::string& path) {
     STEPControl_Writer writer;
     bool any = false;
-    for (int index : tips) {
-        const TopoDS_Shape& shape = doc.shapeAt(index);
+    for (const TopoDS_Shape& shape : shapes) {
         if (shape.IsNull()) continue;
         if (writer.Transfer(shape, STEPControl_AsIs) == IFSelect_RetDone) any = true;
     }
@@ -44,14 +52,10 @@ bool writeStep(const Document3D& doc, const std::string& path) {
     return writer.Write(path.c_str()) == IFSelect_RetDone;
 }
 
-bool writeIges(const Document3D& doc, const std::string& path) {
-    const std::vector<int> tips = tipFeatureIndices(doc);
-    if (tips.empty()) return false;
-
+bool writeIges(const std::vector<TopoDS_Shape>& shapes, const std::string& path) {
     IGESControl_Writer writer;
     bool any = false;
-    for (int index : tips) {
-        const TopoDS_Shape& shape = doc.shapeAt(index);
+    for (const TopoDS_Shape& shape : shapes) {
         if (shape.IsNull()) continue;
         if (writer.AddShape(shape)) any = true;
     }

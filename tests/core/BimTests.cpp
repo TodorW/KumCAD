@@ -347,6 +347,42 @@ TEST_CASE("combinedBimShape fuses columns and beams into the compound too", "[co
     REQUIRE_FALSE(combined.IsNull());
 }
 
+TEST_CASE("combinedBimShape includes roofs and stairs too, not just walls/slabs/columns/beams",
+         "[core3d][bim][roof][stair]") {
+    // A real, quantitative check (exact combined volume), not just
+    // REQUIRE_FALSE(IsNull()) -- that alone wouldn't catch roofs/stairs
+    // being silently dropped from the compound, since the compound is
+    // still non-null as long as anything else in the model built.
+    BimModel model;
+    Roof roof;
+    roof.footprint = {{0, 0}, {10000, 0}, {10000, 4000}, {0, 4000}};
+    roof.baseElevation = 3000.0;
+    roof.pitchRadians = M_PI / 4.0;
+    roof.hip = false;
+    roof.ridgeAlongX = true;
+    model.roofs.push_back(roof);
+
+    Stair stair;
+    stair.x = 0.0;
+    stair.y = 0.0;
+    stair.dirX = 1.0;
+    stair.dirY = 0.0;
+    stair.width = 1000.0;
+    stair.totalRise = 800.0;
+    stair.stepCount = 4;
+    stair.treadDepth = 250.0;
+    model.stairs.push_back(stair);
+
+    const BimShapes shapes = buildBimShapes(model);
+    REQUIRE(shapes.roofShapes.size() == 1);
+    REQUIRE(shapes.stairShapes.size() == 1);
+
+    const TopoDS_Shape combined = combinedBimShape(shapes);
+    REQUIRE_FALSE(combined.IsNull());
+    const double expectedVolume = volumeOf(shapes.roofShapes[0]) + volumeOf(shapes.stairShapes[0]);
+    REQUIRE(volumeOf(combined) == Approx(expectedVolume).epsilon(1e-6));
+}
+
 TEST_CASE("writeIfcLite/readIfcLite round-trips columns, beams, and spaces", "[core3d][bim]") {
     TempPath temp;
     BimModel model;

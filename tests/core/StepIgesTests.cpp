@@ -4,7 +4,9 @@
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <GProp_GProps.hxx>
+#include <gp_Pnt.hxx>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -131,4 +133,49 @@ TEST_CASE("writeStep/writeIges fail cleanly on a document with no valid tip shap
     Document3D empty;
     REQUIRE_FALSE(writeStep(empty, stepTemp.path.string()));
     REQUIRE_FALSE(writeIges(empty, igesTemp.path.string()));
+}
+
+TEST_CASE("writeStep(vector<TopoDS_Shape>) exports several independent shapes into one file",
+         "[core3d][step]") {
+    TempPath temp(".step");
+    const TopoDS_Shape boxA = BRepPrimAPI_MakeBox(10.0, 5.0, 4.0).Shape();
+    const TopoDS_Shape boxB = BRepPrimAPI_MakeBox(2.0, 2.0, 2.0).Shape();
+
+    REQUIRE(writeStep(std::vector<TopoDS_Shape>{boxA, boxB}, temp.path.string()));
+
+    const TopoDS_Shape shape = readStep(temp.path.string());
+    REQUIRE_FALSE(shape.IsNull());
+    REQUIRE(volumeOf(shape) == Approx(10.0 * 5.0 * 4.0 + 2.0 * 2.0 * 2.0).margin(1e-3));
+}
+
+TEST_CASE("writeStep(vector<TopoDS_Shape>) skips null shapes and fails cleanly when nothing is left",
+         "[core3d][step]") {
+    TempPath temp(".step");
+    REQUIRE_FALSE(writeStep(std::vector<TopoDS_Shape>{}, temp.path.string()));
+    REQUIRE_FALSE(writeStep(std::vector<TopoDS_Shape>{TopoDS_Shape()}, temp.path.string()));
+
+    // A real shape alongside a null one still exports -- the null is
+    // skipped, not treated as a hard failure.
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(3.0, 3.0, 3.0).Shape();
+    REQUIRE(writeStep(std::vector<TopoDS_Shape>{TopoDS_Shape(), box}, temp.path.string()));
+    const TopoDS_Shape shape = readStep(temp.path.string());
+    REQUIRE_FALSE(shape.IsNull());
+    REQUIRE(volumeOf(shape) == Approx(27.0).margin(1e-3));
+}
+
+TEST_CASE("writeIges(vector<TopoDS_Shape>) exports several shapes and round-trips their combined bounding box",
+         "[core3d][iges]") {
+    TempPath temp(".igs");
+    const TopoDS_Shape boxA = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 4.0).Shape();
+    const TopoDS_Shape boxB = BRepPrimAPI_MakeBox(gp_Pnt(10, 0, 0), 4.0, 4.0, 4.0).Shape();
+
+    REQUIRE(writeIges(std::vector<TopoDS_Shape>{boxA, boxB}, temp.path.string()));
+
+    const TopoDS_Shape shape = readIges(temp.path.string());
+    REQUIRE_FALSE(shape.IsNull());
+    // Combined bounding box spans x=[0,14], y=[0,4], z=[0,4] -- boxB sits
+    // 10 units away from boxA along X, so this is only possible if BOTH
+    // shapes actually made it into the file, not just one.
+    const double expectedDiagonal = std::sqrt(14.0 * 14.0 + 4.0 * 4.0 + 4.0 * 4.0);
+    REQUIRE(boundingDiagonal(shape) == Approx(expectedDiagonal).margin(1e-3));
 }

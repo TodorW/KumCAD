@@ -1851,8 +1851,8 @@ void Window3D::exportStepFile() {
     const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export STEP"), QString(),
                                                         QStringLiteral("STEP Files (*.step)"));
     if (path.isEmpty()) return;
-    if (!lcad::writeStep(m_document, path.toStdString())) {
-        statusBar()->showMessage(QStringLiteral("STEP export failed -- no valid tip solid in the document"), 4000);
+    if (!lcad::writeStep(exportableTipShapes(), path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("STEP export failed -- no valid solid in the document"), 4000);
         return;
     }
     statusBar()->showMessage(QStringLiteral("Exported STEP to %1").arg(path), 3000);
@@ -1862,8 +1862,8 @@ void Window3D::exportIgesFile() {
     const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export IGES"), QString(),
                                                         QStringLiteral("IGES Files (*.igs)"));
     if (path.isEmpty()) return;
-    if (!lcad::writeIges(m_document, path.toStdString())) {
-        statusBar()->showMessage(QStringLiteral("IGES export failed -- no valid tip solid in the document"), 4000);
+    if (!lcad::writeIges(exportableTipShapes(), path.toStdString())) {
+        statusBar()->showMessage(QStringLiteral("IGES export failed -- no valid solid in the document"), 4000);
         return;
     }
     statusBar()->showMessage(QStringLiteral("Exported IGES to %1").arg(path), 3000);
@@ -1909,7 +1909,7 @@ void Window3D::openAssemblyWindow() {
     window->show();
 }
 
-void Window3D::generateDrawingViews() {
+std::vector<TopoDS_Shape> Window3D::exportableTipShapes() const {
     // Same "tip feature" definition as StepIges.h: a valid feature nothing
     // else consumes as its own input.
     std::vector<bool> consumed(m_document.features().size(), false);
@@ -1921,12 +1921,19 @@ void Window3D::generateDrawingViews() {
     for (int i = 0; i < static_cast<int>(m_document.features().size()); ++i) {
         if (!consumed[static_cast<std::size_t>(i)] && m_document.isValid(i)) tips.push_back(m_document.shapeAt(i));
     }
-    const lcad::BimShapes bimShapes = lcad::buildBimShapes(m_bimModel);
-    for (const auto* shapes : {&bimShapes.wallShapes, &bimShapes.slabShapes, &bimShapes.columnShapes, &bimShapes.beamShapes}) {
-        for (const TopoDS_Shape& shape : *shapes) {
-            if (!shape.IsNull()) tips.push_back(shape);
-        }
-    }
+    // One combined shape for the whole BIM model (walls+slabs+columns+
+    // beams+roofs+stairs -- see combinedBimShape's own comment) rather than
+    // one tip per element: a real architectural plan/elevation wants the
+    // building's own combined outline projected once, not N separately-
+    // projected, potentially-overlapping element views, and STEP/IGES
+    // export previously omitted BIM models from the file entirely.
+    const TopoDS_Shape bimShape = lcad::combinedBimShape(lcad::buildBimShapes(m_bimModel));
+    if (!bimShape.IsNull()) tips.push_back(bimShape);
+    return tips;
+}
+
+void Window3D::generateDrawingViews() {
+    const std::vector<TopoDS_Shape> tips = exportableTipShapes();
     if (tips.empty()) {
         statusBar()->showMessage(QStringLiteral("No solids to draw yet"), 3000);
         return;

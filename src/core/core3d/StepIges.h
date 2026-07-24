@@ -5,6 +5,7 @@
 #include <TopoDS_Shape.hxx>
 
 #include <string>
+#include <vector>
 
 namespace lcad {
 
@@ -17,6 +18,16 @@ namespace lcad {
 // how a real STEP file can hold more than one body).
 bool writeStep(const Document3D& doc, const std::string& path);
 bool writeIges(const Document3D& doc, const std::string& path);
+
+// Same real writer, for a caller that already has its own shape list rather
+// than a Document3D -- e.g. a BIM model's combined shape (see Bim.h's
+// combinedBimShape) or an Assembly's placed components (see Assembly.h's
+// assemblyPlacedShapes), neither of which lives in a Document3D. Null
+// shapes are skipped; fails (false) if none of shapes transfers/adds
+// successfully. The Document3D overloads above are implemented in terms of
+// this one.
+bool writeStep(const std::vector<TopoDS_Shape>& shapes, const std::string& path);
+bool writeIges(const std::vector<TopoDS_Shape>& shapes, const std::string& path);
 
 // Import reads the whole file into a single shape (a compound, if the file
 // held more than one top-level body) -- the caller then wraps it in a

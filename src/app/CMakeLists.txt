@@ -153,6 +153,8 @@ add_executable(kumcad WIN32
     commands/ListCommand.cpp
     commands/DimEditCommand.h
     commands/DimEditCommand.cpp
+    commands/BalloonCommand.h
+    commands/BalloonCommand.cpp
     commands/FindCommand.h
     commands/FindCommand.cpp
     commands/QSelectCommand.h

@@ -59,6 +59,7 @@
 #include "commands/InsertCommand.h"
 #include "commands/LayoutCommand.h"
 #include "commands/LeaderCommand.h"
+#include "commands/BalloonCommand.h"
 #include "commands/LengthenCommand.h"
 #include "commands/MLeaderCommand.h"
 #include "commands/MLeaderStyleCommand.h"
@@ -735,6 +736,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         }
     } else if (cmd == QLatin1String("LEADER") || cmd == QLatin1String("LEAD") || cmd == QLatin1String("LE")) {
         startCommand(std::make_unique<LeaderCommand>(m_document), QStringLiteral("LEADER"));
+    } else if (cmd == QLatin1String("BALLOON")) {
+        startCommand(std::make_unique<BalloonCommand>(m_document), QStringLiteral("BALLOON"));
     } else if (cmd == QLatin1String("MLEADER") || cmd == QLatin1String("MLD")) {
         startCommand(std::make_unique<MLeaderCommand>(m_document), QStringLiteral("MLEADER"));
     } else if (cmd == QLatin1String("MLEADEREDIT")) {

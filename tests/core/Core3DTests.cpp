@@ -535,3 +535,100 @@ TEST_CASE("Document3D Hole rejects degenerate parameters", "[core3d][hole]") {
     noDir.dirX = noDir.dirY = noDir.dirZ = 0.0;
     REQUIRE_FALSE(tryBuild(noDir));
 }
+
+TEST_CASE("Document3D Slice cuts a box in half at the given plane, keeping exactly one side", "[core3d][slice]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D slice;
+    slice.type = FeatureType::Slice;
+    slice.inputA = boxIdx;
+    slice.posX = slice.posY = 0.0;
+    slice.posZ = 10.0; // cutting plane halfway up
+    slice.dirX = slice.dirY = 0.0;
+    slice.dirZ = 1.0;
+    const int sliceIdx = doc.addFeature(slice);
+
+    REQUIRE(doc.isValid(sliceIdx));
+    REQUIRE(volumeOf(doc.shapeAt(sliceIdx)) == Approx(20.0 * 20.0 * 10.0).margin(1e-6));
+
+    Bnd_Box bnd;
+    BRepBndLib::Add(doc.shapeAt(sliceIdx), bnd);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bnd.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE((xmax - xmin) == Approx(20.0).margin(1e-6));
+    REQUIRE((ymax - ymin) == Approx(20.0).margin(1e-6));
+    REQUIRE((zmax - zmin) == Approx(10.0).margin(1e-6));
+    // cutMode false keeps the side the normal points AWAY from: Z < 10.
+    REQUIRE(zmin == Approx(0.0).margin(1e-6));
+    REQUIRE(zmax == Approx(10.0).margin(1e-6));
+}
+
+TEST_CASE("Document3D Slice's cutMode flips which side survives", "[core3d][slice]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D slice;
+    slice.type = FeatureType::Slice;
+    slice.inputA = boxIdx;
+    slice.posZ = 10.0;
+    slice.dirZ = 1.0;
+    slice.cutMode = true;
+    const int sliceIdx = doc.addFeature(slice);
+
+    REQUIRE(doc.isValid(sliceIdx));
+    REQUIRE(volumeOf(doc.shapeAt(sliceIdx)) == Approx(20.0 * 20.0 * 10.0).margin(1e-6));
+
+    Bnd_Box bnd;
+    BRepBndLib::Add(doc.shapeAt(sliceIdx), bnd);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bnd.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    // cutMode true keeps the other side this time: Z > 10.
+    REQUIRE(zmin == Approx(10.0).margin(1e-6));
+    REQUIRE(zmax == Approx(20.0).margin(1e-6));
+}
+
+TEST_CASE("Document3D Slice off-center still produces the exact expected split", "[core3d][slice]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D slice;
+    slice.type = FeatureType::Slice;
+    slice.inputA = boxIdx;
+    slice.posX = 15.0; // cut at X=15, not the midpoint
+    slice.dirX = 1.0;
+    slice.dirZ = 0.0; // dirZ defaults to 1.0 -- must be cleared, or the axis is (1,0,1), not pure X
+    const int sliceIdx = doc.addFeature(slice);
+
+    REQUIRE(doc.isValid(sliceIdx));
+    REQUIRE(volumeOf(doc.shapeAt(sliceIdx)) == Approx(15.0 * 20.0 * 20.0).margin(1e-6));
+}
+
+TEST_CASE("Document3D Slice rejects a missing target or a degenerate normal", "[core3d][slice]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 20.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D noTarget;
+    noTarget.type = FeatureType::Slice;
+    noTarget.inputA = -1;
+    noTarget.dirZ = 1.0;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(noTarget)));
+
+    Feature3D noNormal;
+    noNormal.type = FeatureType::Slice;
+    noNormal.inputA = boxIdx;
+    noNormal.dirX = noNormal.dirY = noNormal.dirZ = 0.0;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(noNormal)));
+}

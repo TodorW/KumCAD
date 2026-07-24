@@ -99,6 +99,7 @@ QString typeName(FeatureType type) {
     case FeatureType::Imported: return QStringLiteral("Imported");
     case FeatureType::Helix: return QStringLiteral("Helix");
     case FeatureType::Hole: return QStringLiteral("Hole");
+    case FeatureType::Slice: return QStringLiteral("Slice");
     }
     return QStringLiteral("Feature");
 }

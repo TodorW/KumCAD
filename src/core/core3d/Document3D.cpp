@@ -1,5 +1,6 @@
 #include "core/core3d/Document3D.h"
 
+#include "core/core3d/HalfSpaceBox.h"
 #include "core/core3d/SketchToFace.h"
 #include "core/core3d/TopoNaming.h"
 #include "core/util/Expr.h"
@@ -8,7 +9,9 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <Bnd_Box.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -809,6 +812,34 @@ void Document3D::recomputeOne(int index) {
         draftBuilder.Build();
         ok = draftBuilder.IsDone();
         if (ok) shape = draftBuilder.Shape();
+        break;
+    }
+    case FeatureType::Slice: {
+        const double dirMag = std::sqrt(f.dirX * f.dirX + f.dirY * f.dirY + f.dirZ * f.dirZ);
+        if (f.inputA < 0 || f.inputA >= index || !isValid(f.inputA) || dirMag < 1e-9) {
+            ok = false;
+            break;
+        }
+        const TopoDS_Shape& target = m_shapes[static_cast<std::size_t>(f.inputA)];
+
+        Bnd_Box bounds;
+        BRepBndLib::Add(target, bounds);
+        double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+        bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        const double diag = gp_Pnt(xmin, ymin, zmin).Distance(gp_Pnt(xmax, ymax, zmax));
+        const double half = diag * 2.0 + 1.0; // generously larger than target, matching TechDraw's own convention
+
+        gp_Dir normal(f.dirX / dirMag, f.dirY / dirMag, f.dirZ / dirMag);
+        // cutMode false (default) keeps the side the normal points AWAY
+        // from -- cut away the box built ON the normal's own side.
+        // cutMode true keeps the OTHER side instead -- cut away the box
+        // built on the REVERSED normal's side.
+        if (f.cutMode) normal.Reverse();
+        const TopoDS_Shape halfSpace = buildCuttingHalfSpaceBox(gp_Pnt(f.posX, f.posY, f.posZ), normal, half);
+
+        BRepAlgoAPI_Cut op(target, halfSpace);
+        ok = op.IsDone();
+        if (ok) shape = op.Shape();
         break;
     }
     case FeatureType::LinearPattern:

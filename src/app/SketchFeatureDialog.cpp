@@ -50,6 +50,7 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     m_typeCombo->addItem(QStringLiteral("Sweep"), static_cast<int>(FeatureType::Sweep));
     m_typeCombo->addItem(QStringLiteral("Draft"), static_cast<int>(FeatureType::Draft));
     m_typeCombo->addItem(QStringLiteral("Hole"), static_cast<int>(FeatureType::Hole));
+    m_typeCombo->addItem(QStringLiteral("Slice"), static_cast<int>(FeatureType::Slice));
     form->addRow(QStringLiteral("Type:"), m_typeCombo);
     connect(m_typeCombo, &QComboBox::currentIndexChanged, this, &SketchFeatureDialog::updateHint);
 
@@ -281,6 +282,11 @@ void SketchFeatureDialog::updateHint() {
                           "main hole; Pattern Count/Hole Type selects Simple(0)/Counterbore(1)/Countersink(2) "
                           "-- Counterbore uses Counterbore Diameter+Depth, Countersink uses Diameter+full "
                           "included Angle in degrees."));
+        break;
+    case FeatureType::Slice:
+        m_hintLabel->setText(QStringLiteral("Slice: cuts Target with the plane through Position with normal "
+                                            "Direction, keeping the half the normal points away from -- check Cut "
+                                            "Mode to keep the other half instead."));
         break;
     default:
         break;

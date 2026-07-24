@@ -164,6 +164,8 @@ add_library(lcad_core STATIC
     document/DocumentExtract.cpp
     document/Spreadsheet.h
     document/Spreadsheet.cpp
+    core3d/HalfSpaceBox.h
+    core3d/HalfSpaceBox.cpp
     document/ExpressTools.cpp
     document/PartLibrary.cpp
     document/LayerTranslator.cpp

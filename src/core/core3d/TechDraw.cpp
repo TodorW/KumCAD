@@ -1,5 +1,6 @@
 #include "core/core3d/TechDraw.h"
 
+#include "core/core3d/HalfSpaceBox.h"
 #include "core/geometry/Dimension.h"
 #include "core/geometry/Line.h"
 
@@ -175,22 +176,6 @@ TechDrawView projectFromAxis(const TopoDS_Shape& shape, const gp_Ax2& axis) {
     collectEdges(extractor.VCompound(), false, view.edges);
     collectEdges(extractor.HCompound(), true, view.edges);
     return view;
-}
-
-// A generously-sized axis-aligned-to-the-cut-plane box covering the whole
-// positive-normal half-space near origin: corner offset -half along both
-// in-plane axes (so it's centered on origin across the plane), extending
-// 2*half laterally and half along +normal -- exactly the "material to
-// remove" half-space BRepAlgoAPI_Cut needs, without relying on
-// BRepPrimAPI_MakeHalfSpace's own reference-point convention.
-TopoDS_Shape buildCuttingHalfSpaceBox(const gp_Pnt& origin, const gp_Dir& normal, double half) {
-    const gp_Dir arbitrary = (std::abs(normal.Z()) < 0.9) ? gp_Dir(0, 0, 1) : gp_Dir(1, 0, 0);
-    const gp_Vec xVec = gp_Vec(arbitrary) - gp_Vec(normal) * gp_Vec(arbitrary).Dot(gp_Vec(normal));
-    const gp_Dir xDir(xVec);
-    const gp_Ax2 originAxis(origin, normal, xDir); // Z=normal, X=xDir, Y=normal^xDir (right-handed, auto)
-    const gp_Pnt corner = origin.Translated(gp_Vec(xDir) * (-half)).Translated(gp_Vec(originAxis.YDirection()) * (-half));
-    const gp_Ax2 boxAxis(corner, normal, xDir);
-    return BRepPrimAPI_MakeBox(boxAxis, 2.0 * half, 2.0 * half, half).Shape();
 }
 
 } // namespace

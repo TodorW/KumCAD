@@ -136,6 +136,21 @@ enum class FeatureType {
                    // a raw int -- inserting a value earlier would shift
                    // every later type's on-disk number and corrupt existing
                    // saved files.
+    Slice,         // cuts inputA's shape with the plane through
+                   // (posX,posY,posZ), normal (dirX,dirY,dirZ) -- built via
+                   // a real OCCT boolean cut against a generously-sized
+                   // half-space box sized from inputA's own bounding box
+                   // (core/core3d/HalfSpaceBox.h, the same technique
+                   // TechDraw.cpp's own projectSectionView already uses for
+                   // its 2D section views), keeping ONE side: cutMode false
+                   // (default) keeps the side the normal points AWAY from
+                   // (matching TechDraw's own "cutting plane looks toward
+                   // the removed half" convention); cutMode true keeps the
+                   // other side instead. Real AutoCAD SLICE's own "keep
+                   // both halves at once" option isn't modeled -- a single
+                   // feature produces exactly one shape in this codebase's
+                   // model; slicing again with cutMode flipped recovers the
+                   // other half as its own separate feature instead.
 };
 
 struct Feature3D {

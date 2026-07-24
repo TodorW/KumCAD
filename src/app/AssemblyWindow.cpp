@@ -238,6 +238,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("Add Mate..."), this, &AssemblyWindow::addMate);
     toolbar->addAction(QStringLiteral("Solve"), this, &AssemblyWindow::solve);
     toolbar->addAction(QStringLiteral("Check DOF..."), this, &AssemblyWindow::checkDof);
+    toolbar->addAction(QStringLiteral("Check Interferences..."), this, &AssemblyWindow::checkInterferences);
 
     if (m_viewport->isAvailable()) {
         statusBar()->showMessage(QStringLiteral("Add components from STEP files, define mates between them, then "
@@ -311,6 +312,28 @@ void AssemblyWindow::checkDof() {
         }
     }
     QMessageBox::information(this, QStringLiteral("Assembly DOF Check"), message);
+}
+
+void AssemblyWindow::checkInterferences() {
+    const std::vector<lcad::InterferencePair> pairs = lcad::detectInterferences(m_assembly);
+    if (pairs.empty()) {
+        QMessageBox::information(this, QStringLiteral("Assembly Interference Check"),
+                                 QStringLiteral("No interferences found -- every placed component's solid is "
+                                               "clear of every other."));
+        return;
+    }
+    QString message = QStringLiteral("%1 interfering pair(s) found:\n").arg(pairs.size());
+    for (const lcad::InterferencePair& pair : pairs) {
+        const QString nameA = QString::fromStdString(m_assembly.components()[static_cast<std::size_t>(pair.componentA)].name);
+        const QString nameB = QString::fromStdString(m_assembly.components()[static_cast<std::size_t>(pair.componentB)].name);
+        message += QStringLiteral("[%1] %2  <->  [%3] %4  (overlap volume %5)\n")
+                       .arg(pair.componentA)
+                       .arg(nameA)
+                       .arg(pair.componentB)
+                       .arg(nameB)
+                       .arg(pair.interferenceVolume);
+    }
+    QMessageBox::warning(this, QStringLiteral("Assembly Interference Check"), message);
 }
 
 void AssemblyWindow::refreshComponentList() {

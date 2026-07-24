@@ -24,6 +24,7 @@ private:
     void addMate();
     void solve();
     void checkDof();
+    void checkInterferences();
     void refreshComponentList();
     void refreshMateList();
     void refreshViewport();

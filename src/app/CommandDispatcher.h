@@ -125,6 +125,13 @@ private:
     // Layers LAYISO turned off (they were visible before), for LAYUNISO.
     std::vector<lcad::LayerId> m_layIsoHidden;
 
+    // OOPS: a clone of whatever ERASE most recently removed, captured
+    // BEFORE the erase (so it survives independent of undo-stack
+    // position -- real AutoCAD's own OOPS restores the last erase even
+    // after other commands ran since, which plain UNDO can't do).
+    // Cleared once restored, or replaced by the next ERASE.
+    std::vector<std::unique_ptr<lcad::Entity>> m_lastErasedSnapshot;
+
     // SCRIPT: the next typed line is the script path; depth guards a
     // script SCRIPTing itself forever.
     bool m_awaitingScriptPath = false;

@@ -898,8 +898,27 @@ void CommandDispatcher::handleCommandText(const QString& text) {
     } else if (cmd == QLatin1String("ERASE") || cmd == QLatin1String("E")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) {
+            m_lastErasedSnapshot.clear();
+            for (lcad::EntityId id : ids) {
+                if (const lcad::Entity* e = m_document.findEntity(id)) m_lastErasedSnapshot.push_back(e->clone());
+            }
             m_view->eraseSelection();
             m_commandLine.appendLine(QStringLiteral("*%1 erased*").arg(ids.size()));
+            emit documentChanged();
+        }
+    } else if (cmd == QLatin1String("OOPS")) {
+        if (m_lastErasedSnapshot.empty()) {
+            m_commandLine.appendLine(QStringLiteral("*Nothing to restore*"));
+        } else {
+            auto batch = std::make_unique<lcad::BatchCommand>("Oops");
+            for (auto& e : m_lastErasedSnapshot) {
+                e->setId(m_document.reserveEntityId());
+                batch->add(std::make_unique<lcad::AddEntityCommand>(m_document, std::move(e)));
+            }
+            const std::size_t count = m_lastErasedSnapshot.size();
+            m_lastErasedSnapshot.clear();
+            m_document.commandStack().execute(std::move(batch));
+            m_commandLine.appendLine(QStringLiteral("*%1 restored*").arg(count));
             emit documentChanged();
         }
     } else if (cmd == QLatin1String("UNDO") || cmd == QLatin1String("U")) {

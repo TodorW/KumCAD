@@ -232,6 +232,72 @@ TEST_CASE("Document3D DeleteFace rejects a missing target or empty faceIndices",
     REQUIRE_FALSE(doc.isValid(doc.addFeature(noFaces)));
 }
 
+TEST_CASE("Document3D OffsetSolid grows a box outward by exactly 2x the offset on every dimension",
+         "[core3d][offsetsolid]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D grow;
+    grow.type = FeatureType::OffsetSolid;
+    grow.inputA = boxIdx;
+    grow.p1 = 2.0; // grow outward by 2 on every face
+    const int grownIdx = doc.addFeature(grow);
+    REQUIRE(doc.isValid(grownIdx));
+
+    // Every one of the box's 6 axis-aligned faces moves outward by 2 along
+    // its own normal, so each dimension grows by 2*2=4 (2 on each side):
+    // 10+4=14 -- an exact volume, not approximate.
+    REQUIRE(volumeOf(doc.shapeAt(grownIdx)) == Approx(14.0 * 14.0 * 14.0).margin(1e-3));
+
+    Bnd_Box bounds;
+    BRepBndLib::Add(doc.shapeAt(grownIdx), bounds);
+    double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+    bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(xmin == Approx(-2.0).margin(1e-3));
+    REQUIRE(xmax == Approx(12.0).margin(1e-3));
+}
+
+TEST_CASE("Document3D OffsetSolid shrinks a box inward by exactly 2x the offset on every dimension",
+         "[core3d][offsetsolid]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D shrink;
+    shrink.type = FeatureType::OffsetSolid;
+    shrink.inputA = boxIdx;
+    shrink.p1 = -2.0; // shrink inward by 2 on every face
+    const int shrunkIdx = doc.addFeature(shrink);
+    REQUIRE(doc.isValid(shrunkIdx));
+
+    REQUIRE(volumeOf(doc.shapeAt(shrunkIdx)) == Approx(6.0 * 6.0 * 6.0).margin(1e-3));
+}
+
+TEST_CASE("Document3D OffsetSolid rejects a missing target or a zero distance", "[core3d][offsetsolid]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    Feature3D missingTarget;
+    missingTarget.type = FeatureType::OffsetSolid;
+    missingTarget.inputA = -1;
+    missingTarget.p1 = 2.0;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(missingTarget)));
+
+    Feature3D zeroDistance;
+    zeroDistance.type = FeatureType::OffsetSolid;
+    zeroDistance.inputA = boxIdx;
+    zeroDistance.p1 = 0.0;
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(zeroDistance)));
+}
+
 TEST_CASE("Document3D Fillet with specific edgeIndices rounds less material than every-edge mode",
           "[core3d][fillet][pick]") {
     Document3D doc;

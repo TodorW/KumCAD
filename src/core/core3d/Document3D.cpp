@@ -12,6 +12,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
@@ -904,6 +905,25 @@ void Document3D::recomputeOne(int index) {
         defeature.Build();
         ok = defeature.IsDone();
         if (ok) shape = defeature.Shape();
+        break;
+    }
+    case FeatureType::OffsetSolid: {
+        if (f.inputA < 0 || f.inputA >= index || !isValid(f.inputA) || std::abs(f.p1) < 1e-9) {
+            ok = false;
+            break;
+        }
+        const TopoDS_Shape& target = m_shapes[static_cast<std::size_t>(f.inputA)];
+        BRepOffsetAPI_MakeOffsetShape offsetBuilder;
+        // GeomAbs_Intersection (sharp corners: adjacent offset faces are
+        // enlarged and intersected exactly) instead of the algorithm's own
+        // default GeomAbs_Arc (which rounds every convex corner/edge with
+        // a pipe/sphere) -- sharp corners are the predictable, expected
+        // behavior for a mechanical-CAD "grow/shrink this solid" op (a box
+        // offset outward should stay a box, not gain rounded corners).
+        offsetBuilder.PerformByJoin(target, f.p1, 1e-3, BRepOffset_Skin, Standard_False, Standard_False,
+                                    GeomAbs_Intersection);
+        ok = offsetBuilder.IsDone();
+        if (ok) shape = offsetBuilder.Shape();
         break;
     }
     case FeatureType::LinearPattern:

@@ -53,6 +53,7 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     m_typeCombo->addItem(QStringLiteral("Slice"), static_cast<int>(FeatureType::Slice));
     m_typeCombo->addItem(QStringLiteral("PressPull"), static_cast<int>(FeatureType::PressPull));
     m_typeCombo->addItem(QStringLiteral("Delete Face"), static_cast<int>(FeatureType::DeleteFace));
+    m_typeCombo->addItem(QStringLiteral("Offset Solid"), static_cast<int>(FeatureType::OffsetSolid));
     form->addRow(QStringLiteral("Type:"), m_typeCombo);
     connect(m_typeCombo, &QComboBox::currentIndexChanged, this, &SketchFeatureDialog::updateHint);
 
@@ -305,6 +306,12 @@ void SketchFeatureDialog::updateHint() {
             QStringLiteral("Delete Face: removes Target's listed Face Indices entirely (real OCCT feature "
                           "removal) and heals the surrounding geometry back closed -- strips out a fillet, "
                           "chamfer, hole, or boss with no earlier feature to just delete instead."));
+        break;
+    case FeatureType::OffsetSolid:
+        m_hintLabel->setText(
+            QStringLiteral("Offset Solid: grows or shrinks Target as a whole -- every face moves along its own "
+                          "outward normal by the Height/.../Signed Distance field's value at once, no open "
+                          "face needed (unlike Shell). Positive grows outward, negative shrinks inward."));
         break;
     default:
         break;

@@ -181,6 +181,22 @@ enum class FeatureType {
                    // faceIndices must be non-empty (unlike Fillet/
                    // Chamfer's "empty means every edge": deleting every
                    // face would leave nothing).
+    OffsetSolid,   // real FreeCAD Part "3D Offset" / a true whole-solid
+                   // grow-or-shrink, distinct from Shell: every face of
+                   // inputA moves along its own outward normal by p1 at
+                   // once, with NO open face (unlike Shell, which always
+                   // needs at least one). p1 > 0 grows the solid outward,
+                   // p1 < 0 shrinks it inward -- OCCT's own
+                   // BRepOffsetAPI_MakeOffsetShape sign convention
+                   // directly, no flip needed. Built via PerformByJoin
+                   // with GeomAbs_Intersection join (sharp corners --
+                   // adjacent offset faces enlarged and intersected
+                   // exactly, NOT the algorithm's own default GeomAbs_Arc,
+                   // which rounds every convex corner/edge with a pipe/
+                   // sphere; a box offset outward should stay a box).
+                   // Can still self-intersect on tight internal corners
+                   // for too-large an offset -- a real OCCT limitation
+                   // this codebase doesn't paper over.
 };
 
 struct Feature3D {

@@ -62,6 +62,16 @@ private:
     // shapes into a new 2D drawing.
     void generateDrawingViews();
 
+    // TechDraw.h's own projectSectionView/projectViewAux/projectDetailView
+    // were fully built and tested but had no UI path to them at all --
+    // generateDrawingViews only ever calls the fixed 4-view projectView.
+    // These three close that gap: each operates on the single selected
+    // feature, prompts for that view type's own parameters, and writes a
+    // dedicated DXF.
+    void generateSectionView();
+    void generateAuxiliaryView();
+    void generateDetailView();
+
     // Phase 3.2: builds a sheet-metal strip (see SheetMetal.h) and adds it
     // as an Imported feature (it has no parametric recipe Feature3D
     // understands, same as a STEP import), and separately exports its flat

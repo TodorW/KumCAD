@@ -291,3 +291,74 @@ TEST_CASE("projectSectionView returns no edges for a null shape or a degenerate 
     REQUIRE(projectSectionView(TopoDS_Shape(), ViewDirection::Top, 0, 0, 0, 0, 0, 1).edges.empty());
     REQUIRE(projectSectionView(box, ViewDirection::Top, 0, 0, 0, 0, 0, 0).edges.empty());
 }
+
+TEST_CASE("projectDetailView keeps a segment entirely inside the circle unchanged (besides re-centering/scale)",
+         "[core3d][techdraw][detail]") {
+    TechDrawView source;
+    source.edges.push_back({-1.0, 0.0, 1.0, 0.0, false});
+
+    const TechDrawView detail = projectDetailView(source, 0.0, 0.0, 5.0, 2.0);
+    REQUIRE(detail.edges.size() == 1);
+    REQUIRE(detail.edges[0].x1 == Approx(-2.0)); // (-1-0)*2
+    REQUIRE(detail.edges[0].x2 == Approx(2.0));
+    REQUIRE(detail.edges[0].y1 == Approx(0.0));
+    REQUIRE(detail.edges[0].hidden == false);
+}
+
+TEST_CASE("projectDetailView drops a segment entirely outside the circle", "[core3d][techdraw][detail]") {
+    TechDrawView source;
+    source.edges.push_back({100.0, 100.0, 200.0, 200.0, false});
+    const TechDrawView detail = projectDetailView(source, 0.0, 0.0, 5.0, 1.0);
+    REQUIRE(detail.edges.empty());
+}
+
+TEST_CASE("projectDetailView clips a segment exactly at the circle boundary, keeping only the inside portion",
+         "[core3d][techdraw][detail]") {
+    // A horizontal segment from x=-10 to x=10 through a circle of radius
+    // 3 centered at the origin: the real inside portion is exactly
+    // x in [-3, 3] (a well-known, hand-checkable line-circle intersection).
+    TechDrawView source;
+    source.edges.push_back({-10.0, 0.0, 10.0, 0.0, true});
+
+    const TechDrawView detail = projectDetailView(source, 0.0, 0.0, 3.0, 1.0);
+    REQUIRE(detail.edges.size() == 1);
+    const auto& e = detail.edges[0];
+    REQUIRE(std::min(e.x1, e.x2) == Approx(-3.0).margin(1e-6));
+    REQUIRE(std::max(e.x1, e.x2) == Approx(3.0).margin(1e-6));
+    REQUIRE(e.y1 == Approx(0.0).margin(1e-6));
+    REQUIRE(e.hidden == true); // hidden status carries through from the source edge
+}
+
+TEST_CASE("projectDetailView clips a chord that only partially crosses the circle", "[core3d][techdraw][detail]") {
+    // A vertical segment at x=4 from y=-10 to y=10, crossing a circle of
+    // radius 5 centered at the origin: real intersection is
+    // y = +-sqrt(5^2-4^2) = +-3 (a 3-4-5 right triangle).
+    TechDrawView source;
+    source.edges.push_back({4.0, -10.0, 4.0, 10.0, false});
+
+    const TechDrawView detail = projectDetailView(source, 0.0, 0.0, 5.0, 1.0);
+    REQUIRE(detail.edges.size() == 1);
+    const auto& e = detail.edges[0];
+    REQUIRE(std::min(e.y1, e.y2) == Approx(-3.0).margin(1e-6));
+    REQUIRE(std::max(e.y1, e.y2) == Approx(3.0).margin(1e-6));
+}
+
+TEST_CASE("projectDetailView re-centers the output at the origin, not at the circle's own world position",
+         "[core3d][techdraw][detail]") {
+    TechDrawView source;
+    source.edges.push_back({48.0, 98.0, 52.0, 102.0, false}); // straddles (50,100)
+
+    const TechDrawView detail = projectDetailView(source, 50.0, 100.0, 10.0, 3.0);
+    REQUIRE(detail.edges.size() == 1);
+    // (48-50)*3 = -6, (52-50)*3 = 6 -- centered at the origin, not at (50,100).
+    REQUIRE(detail.edges[0].x1 == Approx(-6.0));
+    REQUIRE(detail.edges[0].x2 == Approx(6.0));
+}
+
+TEST_CASE("projectDetailView returns no edges for a non-positive radius or scale", "[core3d][techdraw][detail]") {
+    TechDrawView source;
+    source.edges.push_back({-1.0, 0.0, 1.0, 0.0, false});
+    REQUIRE(projectDetailView(source, 0.0, 0.0, 0.0, 1.0).edges.empty());
+    REQUIRE(projectDetailView(source, 0.0, 0.0, 5.0, 0.0).edges.empty());
+    REQUIRE(projectDetailView(source, 0.0, 0.0, -5.0, 1.0).edges.empty());
+}

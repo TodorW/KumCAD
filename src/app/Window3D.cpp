@@ -1415,6 +1415,9 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     fileMenu->addAction(QStringLiteral("New Assembly Window..."), this, &Window3D::openAssemblyWindow);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("Generate Drawing Views..."), this, &Window3D::generateDrawingViews);
+    fileMenu->addAction(QStringLiteral("Generate Section View..."), this, &Window3D::generateSectionView);
+    fileMenu->addAction(QStringLiteral("Generate Auxiliary View..."), this, &Window3D::generateAuxiliaryView);
+    fileMenu->addAction(QStringLiteral("Generate Detail View..."), this, &Window3D::generateDetailView);
     fileMenu->addSeparator();
     fileMenu->addAction(QStringLiteral("Add Sheet Metal Part..."), this, &Window3D::addSheetMetalPart);
     fileMenu->addAction(QStringLiteral("Export Flat Pattern..."), this, &Window3D::exportFlatPattern);
@@ -1917,6 +1920,174 @@ void Window3D::generateDrawingViews() {
     }
     statusBar()->showMessage(
         QStringLiteral("Drawing views (Front/Top/Right/Iso), auto-dimensioned, written to %1").arg(path), 4000);
+}
+
+namespace {
+lcad::ViewDirection askViewDirection(QWidget* parent, const QString& title, bool* ok) {
+    const QStringList options{QStringLiteral("Front"), QStringLiteral("Top"), QStringLiteral("Right"),
+                              QStringLiteral("Iso")};
+    const QString choice = QInputDialog::getItem(parent, title, QStringLiteral("View direction:"), options, 0, false, ok);
+    if (choice == QStringLiteral("Top")) return lcad::ViewDirection::Top;
+    if (choice == QStringLiteral("Right")) return lcad::ViewDirection::Right;
+    if (choice == QStringLiteral("Iso")) return lcad::ViewDirection::Iso;
+    return lcad::ViewDirection::Front;
+}
+} // namespace
+
+void Window3D::generateSectionView() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature first"), 3000);
+        return;
+    }
+    const int index = selected[0].row();
+    if (!m_document.isValid(index)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+    const TopoDS_Shape& shape = m_document.shapeAt(index);
+
+    bool ok = false;
+    const lcad::ViewDirection direction = askViewDirection(this, QStringLiteral("Section View"), &ok);
+    if (!ok) return;
+
+    const QString t = QStringLiteral("Section View");
+    const double originX = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane origin X:"), 0.0, -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double originY = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane origin Y:"), 0.0, -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double originZ = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane origin Z:"), 0.0, -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double normalX = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane normal X:"), 0.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double normalY = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane normal Y:"), 0.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double normalZ = QInputDialog::getDouble(this, t, QStringLiteral("Cutting plane normal Z:"), 1.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+
+    const QString path = QFileDialog::getSaveFileName(this, t, QString(), QStringLiteral("DXF Files (*.dxf)"));
+    if (path.isEmpty()) return;
+
+    const lcad::TechDrawView view =
+        lcad::projectSectionView(shape, direction, originX, originY, originZ, normalX, normalY, normalZ);
+    if (view.edges.empty()) {
+        QMessageBox::warning(this, t,
+                             QStringLiteral("The cutting plane produced no visible geometry -- check the origin/normal."));
+        return;
+    }
+    lcad::Document doc2d;
+    lcad::insertViewIntoDocument(doc2d, view, 0.0, 0.0);
+    if (direction != lcad::ViewDirection::Iso) {
+        lcad::AutoDimensionOptions dimOptions;
+        dimOptions.dimensionEachAxisAlignedEdge = true;
+        lcad::autoDimensionView(doc2d, view, dimOptions);
+    }
+
+    std::string error;
+    if (!lcad::writeDxf(doc2d, path.toStdString(), &error)) {
+        QMessageBox::warning(this, QStringLiteral("Export Failed"), QString::fromStdString(error));
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Section view written to %1").arg(path), 4000);
+}
+
+void Window3D::generateAuxiliaryView() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature first"), 3000);
+        return;
+    }
+    const int index = selected[0].row();
+    if (!m_document.isValid(index)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+    const TopoDS_Shape& shape = m_document.shapeAt(index);
+
+    bool ok = false;
+    const QString t = QStringLiteral("Auxiliary View");
+    const double eyeX = QInputDialog::getDouble(this, t, QStringLiteral("Eye direction X (looking into the page):"), 1.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double eyeY = QInputDialog::getDouble(this, t, QStringLiteral("Eye direction Y:"), 1.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double eyeZ = QInputDialog::getDouble(this, t, QStringLiteral("Eye direction Z:"), 1.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double upX = QInputDialog::getDouble(this, t, QStringLiteral("Up reference direction X:"), 0.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double upY = QInputDialog::getDouble(this, t, QStringLiteral("Up reference direction Y:"), 0.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+    const double upZ = QInputDialog::getDouble(this, t, QStringLiteral("Up reference direction Z:"), 1.0, -1.0, 1.0, 3, &ok);
+    if (!ok) return;
+
+    const QString path = QFileDialog::getSaveFileName(this, t, QString(), QStringLiteral("DXF Files (*.dxf)"));
+    if (path.isEmpty()) return;
+
+    const lcad::TechDrawView view = lcad::projectViewAux(shape, eyeX, eyeY, eyeZ, upX, upY, upZ);
+    if (view.edges.empty()) {
+        QMessageBox::warning(this, t, QStringLiteral("That eye/up direction produced no visible geometry."));
+        return;
+    }
+    lcad::Document doc2d;
+    lcad::insertViewIntoDocument(doc2d, view, 0.0, 0.0);
+
+    std::string error;
+    if (!lcad::writeDxf(doc2d, path.toStdString(), &error)) {
+        QMessageBox::warning(this, QStringLiteral("Export Failed"), QString::fromStdString(error));
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Auxiliary view written to %1").arg(path), 4000);
+}
+
+void Window3D::generateDetailView() {
+    const auto selected = m_featureList->selectionModel()->selectedRows();
+    if (selected.size() != 1) {
+        statusBar()->showMessage(QStringLiteral("Select exactly one feature first"), 3000);
+        return;
+    }
+    const int index = selected[0].row();
+    if (!m_document.isValid(index)) {
+        statusBar()->showMessage(QStringLiteral("That feature isn't valid"), 3000);
+        return;
+    }
+    const TopoDS_Shape& shape = m_document.shapeAt(index);
+
+    bool ok = false;
+    const lcad::ViewDirection direction = askViewDirection(this, QStringLiteral("Detail View"), &ok);
+    if (!ok) return;
+    const lcad::TechDrawView baseView = lcad::projectView(shape, direction);
+    if (baseView.edges.empty()) {
+        statusBar()->showMessage(QStringLiteral("That view has no visible geometry"), 3000);
+        return;
+    }
+
+    const QString t = QStringLiteral("Detail View");
+    const double centerX = QInputDialog::getDouble(this, t, QStringLiteral("Detail circle center X (in the base view's own coordinates):"), 0.0, -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double centerY = QInputDialog::getDouble(this, t, QStringLiteral("Detail circle center Y:"), 0.0, -1e6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double radius = QInputDialog::getDouble(this, t, QStringLiteral("Detail circle radius:"), 1.0, 1e-6, 1e6, 3, &ok);
+    if (!ok) return;
+    const double scale = QInputDialog::getDouble(this, t, QStringLiteral("Detail scale factor:"), 2.0, 1e-6, 1e6, 3, &ok);
+    if (!ok) return;
+
+    const QString path = QFileDialog::getSaveFileName(this, t, QString(), QStringLiteral("DXF Files (*.dxf)"));
+    if (path.isEmpty()) return;
+
+    const lcad::TechDrawView detail = lcad::projectDetailView(baseView, centerX, centerY, radius, scale);
+    if (detail.edges.empty()) {
+        QMessageBox::warning(this, t, QStringLiteral("That circle doesn't cross any geometry in the base view."));
+        return;
+    }
+    lcad::Document doc2d;
+    lcad::insertViewIntoDocument(doc2d, baseView, 0.0, 0.0);
+    lcad::insertViewIntoDocument(doc2d, detail, radius * scale * 3.0, 0.0);
+
+    std::string error;
+    if (!lcad::writeDxf(doc2d, path.toStdString(), &error)) {
+        QMessageBox::warning(this, QStringLiteral("Export Failed"), QString::fromStdString(error));
+        return;
+    }
+    statusBar()->showMessage(QStringLiteral("Detail view written to %1").arg(path), 4000);
 }
 
 void Window3D::addSheetMetalPart() {

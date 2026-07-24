@@ -70,6 +70,52 @@ gp_Ax2 axisFor(ViewDirection direction) {
 // segments once baked into the 2D document.
 constexpr int kCurveSegments = 32;
 
+// Real line-circle clipping: the portion of segment (x1,y1)-(x2,y2)
+// that lies inside the circle (cx,cy,r), parametrized as P(t) = P1 +
+// t*(P2-P1). |P(t)-C|^2 - r^2 is a quadratic a*t^2+b*t+c in t (a>0 for
+// any non-degenerate segment), negative (inside) strictly between its
+// two real roots and non-negative outside them -- the inside portion of
+// the segment is exactly t in [0,1] intersected with [tLo,tHi] (or, when
+// the quadratic has no real roots at all, the WHOLE line is uniformly
+// inside or uniformly outside, decided by its sign at t=0). Returns
+// hasSegment=false if no part of the segment is inside (including a
+// degenerate zero-length "segment" whose single point is outside).
+struct ClippedSegment {
+    bool hasSegment = false;
+    double x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
+};
+
+ClippedSegment clipSegmentToCircle(double x1, double y1, double x2, double y2, double cx, double cy, double r) {
+    const double dx = x2 - x1, dy = y2 - y1;
+    const double fx = x1 - cx, fy = y1 - cy;
+    const double a = dx * dx + dy * dy;
+    const double c = fx * fx + fy * fy - r * r;
+
+    if (a < 1e-18) { // degenerate zero-length segment
+        if (c > 0.0) return {};
+        return {true, x1, y1, x1, y1};
+    }
+
+    const double b = 2.0 * (fx * dx + fy * dy);
+    const double discriminant = b * b - 4.0 * a * c;
+
+    double tLo, tHi;
+    if (discriminant < 0.0) {
+        if (c > 0.0) return {}; // uniformly outside
+        tLo = 0.0;
+        tHi = 1.0; // uniformly inside
+    } else {
+        const double sq = std::sqrt(discriminant);
+        tLo = (-b - sq) / (2.0 * a);
+        tHi = (-b + sq) / (2.0 * a);
+    }
+
+    const double clipLo = std::max(0.0, tLo);
+    const double clipHi = std::min(1.0, tHi);
+    if (clipHi < clipLo) return {};
+    return {true, x1 + clipLo * dx, y1 + clipLo * dy, x1 + clipHi * dx, y1 + clipHi * dy};
+}
+
 void collectEdges(const TopoDS_Shape& compound, bool hidden, std::vector<ProjectedEdge>& out) {
     if (compound.IsNull()) return;
     for (TopExp_Explorer exp(compound, TopAbs_EDGE); exp.More(); exp.Next()) {
@@ -279,6 +325,26 @@ void autoDimensionView(Document& doc2d, const TechDrawView& view, const AutoDime
             addLinear(Point2D(x + ox, ya + oy), Point2D(x + ox, yb + oy), Point2D(x + ox - gap, (ya + yb) / 2.0 + oy));
         }
     }
+}
+
+TechDrawView projectDetailView(const TechDrawView& source, double centerX, double centerY, double radius,
+                               double scale) {
+    TechDrawView result;
+    if (radius <= 0.0 || scale <= 0.0) return result;
+
+    for (const ProjectedEdge& e : source.edges) {
+        const ClippedSegment clipped = clipSegmentToCircle(e.x1, e.y1, e.x2, e.y2, centerX, centerY, radius);
+        if (!clipped.hasSegment) continue;
+
+        ProjectedEdge out;
+        out.x1 = (clipped.x1 - centerX) * scale;
+        out.y1 = (clipped.y1 - centerY) * scale;
+        out.x2 = (clipped.x2 - centerX) * scale;
+        out.y2 = (clipped.y2 - centerY) * scale;
+        out.hidden = e.hidden;
+        result.edges.push_back(out);
+    }
+    return result;
 }
 
 } // namespace lcad

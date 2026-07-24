@@ -97,4 +97,25 @@ struct AutoDimensionOptions {
 // the measured values are guaranteed correct, not the layout.
 void autoDimensionView(Document& doc2d, const TechDrawView& view, const AutoDimensionOptions& options = {});
 
+// Detail view: crops source's own already-projected edges to a circular
+// region (centerX, centerY, radius, in source's own 2D coordinates),
+// scaled up by `scale` -- real AutoCAD/TechDraw's own "circle a region,
+// show it bigger elsewhere" detail view. Each edge is clipped EXACTLY
+// at the circle boundary (a real line-circle intersection, keeping only
+// the portion actually inside -- see TechDraw.cpp's own clipSegmentToCircle),
+// not a whole-edge in/out test, matching this codebase's other TechDraw
+// functions' "geometrically exact" standard; a straight tessellated
+// chord that only partially crosses the circle contributes just its own
+// inside portion. hidden status carries through from the source edge
+// unchanged. Output coordinates are CENTERED AT THE ORIGIN (recentered
+// from centerX/centerY, then scaled), not left at the circle's own
+// position, so callers can place the result with
+// insertViewIntoDocument's own offsetX/offsetY exactly like any other
+// view, no special-casing needed. Real, disclosed scope: the circular
+// boundary marker and "DETAIL A"/scale label real AutoCAD draws
+// automatically on the SOURCE view aren't produced here -- only the
+// enlarged detail geometry itself.
+TechDrawView projectDetailView(const TechDrawView& source, double centerX, double centerY, double radius,
+                               double scale);
+
 } // namespace lcad

@@ -8,6 +8,7 @@
 #include "core/io/KiCadPcb.h"
 #include "core/io/KiCadSch.h"
 #include "core/pcb/Autorouter.h"
+#include "core/pcb/BoardOutline.h"
 #include "core/pcb/CopperPour.h"
 #include "core/pcb/Drc.h"
 #include "core/pcb/FootprintGenerator.h"
@@ -248,7 +249,8 @@ std::optional<QString> CopperPourCommand::onText(const QString& text) {
     }
 
     const auto ids = lcad::buildCopperPourWithClearance(m_document, m_document.currentLayer(), m_boundary,
-                                                         m_ownNetPositions, m_gridSize, m_clearance, m_thermalRelief);
+                                                         m_ownNetPositions, m_gridSize, m_clearance, m_thermalRelief,
+                                                         lcad::deriveKeepoutZones(m_document));
     if (ids.empty()) return QStringLiteral("*Pour produced no copper -- check boundary/grid size*");
     return QStringLiteral("*Copper pour: %1 piece(s)*").arg(ids.size());
 }
@@ -511,6 +513,7 @@ std::optional<QString> AutorouteCommand::onText(const QString& text) {
             }
         }
 
+        m_params.keepouts = lcad::deriveKeepoutZones(m_document);
         const lcad::AutorouteResult result = lcad::autoroute(m_document, m_nets, m_params, m_netClasses);
         if (result.failedCount == 0) {
             return QStringLiteral("*Autoroute: %1 connection(s) routed*").arg(result.routedCount);

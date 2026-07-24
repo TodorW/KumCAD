@@ -1,5 +1,6 @@
 #include "core/document/Document.h"
 #include "core/geometry/Hatch.h"
+#include "core/geometry/Polyline.h"
 #include "core/geometry/Track.h"
 #include "core/geometry/Via.h"
 #include "core/pcb/CopperPour.h"
@@ -115,6 +116,31 @@ TEST_CASE("buildCopperPourWithClearance excludes a KeepoutZone that blocks coppe
     REQUIRE_FALSE(ids.empty());
     // No obstacles other than the zone itself, so the shortfall from a
     // full fill is (approximately) exactly the zone's own area.
+    REQUIRE(totalHatchArea(doc) == Approx(20.0 * 10.0 - 10.0 * 6.0).margin(1.0));
+}
+
+TEST_CASE("deriveKeepoutZones drawn on the Keepout layer really excludes copper from a pour end-to-end",
+         "[pcb][pour][keepout]") {
+    Document doc;
+    const LayerId layer = doc.addLayer("F.Cu", Color{200, 100, 0});
+    const std::vector<Point2D> boundary = {{0, 0}, {20, 0}, {20, 10}, {0, 10}};
+
+    // A keepout area is just ordinary closed geometry on the reserved
+    // "Keepout" layer -- the same convention deriveBoardOutline already
+    // uses for Edge.Cuts -- picked up by deriveKeepoutZones with no
+    // dedicated entity type or UI needed.
+    const LayerId keepoutLayer = doc.addLayer("Keepout", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), keepoutLayer, std::vector<Point2D>{{5, 2}, {15, 2}, {15, 8}, {5, 8}}, true));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 1);
+    REQUIRE(zones[0].blocksCopperPour); // real defaults, not a stub
+    REQUIRE(zones[0].blocksAutorouting);
+    REQUIRE_FALSE(zones[0].layer.has_value()); // applies to every layer
+
+    const auto ids = buildCopperPourWithClearance(doc, layer, boundary, {}, 0.5, 0.0, {}, zones);
+    REQUIRE_FALSE(ids.empty());
     REQUIRE(totalHatchArea(doc) == Approx(20.0 * 10.0 - 10.0 * 6.0).margin(1.0));
 }
 

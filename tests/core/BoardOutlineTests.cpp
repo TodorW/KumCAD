@@ -127,6 +127,52 @@ TEST_CASE("deriveBoardOutline ignores geometry on other layers", "[pcb][boardout
     REQUIRE(polygonArea(outline) == Approx(200.0).margin(1e-6));
 }
 
+TEST_CASE("deriveKeepoutZones returns one zone per independent closed loop on the Keepout layer",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    const LayerId keepout = doc.addLayer("Keepout", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), keepout, std::vector<Point2D>{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, true));
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), keepout, std::vector<Point2D>{{20, 0}, {26, 0}, {26, 4}, {20, 4}}, true));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 2); // unlike deriveBoardOutline, every loop becomes its own zone
+
+    double totalArea = 0.0;
+    for (const auto& zone : zones) {
+        totalArea += polygonArea(zone.polygon);
+        REQUIRE(zone.blocksCopperPour);
+        REQUIRE(zone.blocksAutorouting);
+        REQUIRE_FALSE(zone.layer.has_value());
+    }
+    REQUIRE(totalArea == Approx(10.0 * 10.0 + 6.0 * 4.0).margin(1e-6));
+}
+
+TEST_CASE("deriveKeepoutZones chains a mixed line+arc loop the same way deriveBoardOutline does",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    const LayerId keepout = doc.addLayer("Keepout", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<LineEntity>(doc.reserveEntityId(), keepout, Point2D(0, 0), Point2D(10, 0)));
+    doc.addEntity(std::make_unique<ArcEntity>(doc.reserveEntityId(), keepout, Point2D(10, 5), 5.0, -M_PI / 2, M_PI / 2));
+    doc.addEntity(std::make_unique<LineEntity>(doc.reserveEntityId(), keepout, Point2D(10, 10), Point2D(0, 10)));
+    doc.addEntity(std::make_unique<LineEntity>(doc.reserveEntityId(), keepout, Point2D(0, 10), Point2D(0, 0)));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 1);
+    const double expected = 10.0 * 10.0 + M_PI * 5.0 * 5.0 / 2.0; // rect + the semicircle bulge
+    REQUIRE(polygonArea(zones[0].polygon) == Approx(expected).epsilon(1e-3));
+}
+
+TEST_CASE("deriveKeepoutZones returns empty when there's no Keepout layer or geometry",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    REQUIRE(deriveKeepoutZones(doc).empty());
+
+    doc.addLayer("Keepout", Color{255, 0, 255});
+    REQUIRE(deriveKeepoutZones(doc).empty());
+}
+
 TEST_CASE("pointInKeepout respects blocksCopperPour/blocksAutorouting and layer restriction",
          "[pcb][boardoutline][keepout]") {
     KeepoutZone unrestricted;

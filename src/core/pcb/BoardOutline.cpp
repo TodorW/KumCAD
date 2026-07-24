@@ -104,9 +104,12 @@ std::vector<std::vector<Point2D>> chainIntoLoops(std::vector<RawEdge> edges, dou
     return loops;
 }
 
-} // namespace
-
-std::vector<Point2D> deriveBoardOutline(const Document& doc, const std::string& layerName, double chainTolerance) {
+// Every closed loop found on layerName's own geometry -- the shared
+// collection step behind both deriveBoardOutline (picks the single
+// largest-area loop) and deriveKeepoutZones (keeps every loop, each as its
+// own zone) below.
+std::vector<std::vector<Point2D>> deriveAllClosedLoops(const Document& doc, const std::string& layerName,
+                                                        double chainTolerance) {
     LayerId targetLayer = 0;
     bool found = false;
     for (const Layer& layer : doc.layers()) {
@@ -182,11 +185,27 @@ std::vector<Point2D> deriveBoardOutline(const Document& doc, const std::string& 
     }
 
     for (auto& loop : chainIntoLoops(std::move(edges), chainTolerance)) loops.push_back(std::move(loop));
+    return loops;
+}
 
+} // namespace
+
+std::vector<Point2D> deriveBoardOutline(const Document& doc, const std::string& layerName, double chainTolerance) {
+    std::vector<std::vector<Point2D>> loops = deriveAllClosedLoops(doc, layerName, chainTolerance);
     if (loops.empty()) return {};
     return *std::max_element(loops.begin(), loops.end(), [](const std::vector<Point2D>& a, const std::vector<Point2D>& b) {
         return polygonArea(a) < polygonArea(b);
     });
+}
+
+std::vector<KeepoutZone> deriveKeepoutZones(const Document& doc, const std::string& layerName, double chainTolerance) {
+    std::vector<KeepoutZone> zones;
+    for (auto& loop : deriveAllClosedLoops(doc, layerName, chainTolerance)) {
+        KeepoutZone zone;
+        zone.polygon = std::move(loop);
+        zones.push_back(std::move(zone));
+    }
+    return zones;
 }
 
 bool pointInKeepout(const Point2D& p, LayerId layer, const std::vector<KeepoutZone>& zones, bool forPour) {

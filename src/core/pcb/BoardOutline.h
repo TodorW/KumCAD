@@ -56,6 +56,21 @@ struct KeepoutZone {
     bool blocksAutorouting = true;
 };
 
+// Reads every closed loop on layerName's own geometry (default "Keepout",
+// a reserved layer name matching how deriveBoardOutline above already
+// treats "Edge.Cuts" -- a real keepout area drawn as ordinary closed
+// Polyline/Line+Arc geometry, no dedicated entity type needed) into one
+// KeepoutZone per loop. Unlike deriveBoardOutline, every closed loop found
+// becomes its own zone rather than just the largest -- a board can have
+// several independent keepout areas. Each zone applies to every layer
+// (layer left nullopt) and blocks both copper pour and autorouting -- a
+// real, disclosed simplification: this codebase doesn't expose a way to
+// draw a route-only or pour-only or single-layer keepout, unlike
+// KeepoutZone's own per-zone flags, which still work correctly for a
+// caller that builds zones some other way (e.g. a test).
+std::vector<KeepoutZone> deriveKeepoutZones(const Document& doc, const std::string& layerName = "Keepout",
+                                            double chainTolerance = 1e-6);
+
 // True if p (on layer) falls inside any zone in zones whose own
 // restriction (blocksCopperPour if forPour, else blocksAutorouting) is
 // set and whose own layer (if restricted to one) matches layer.

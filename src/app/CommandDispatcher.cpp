@@ -101,6 +101,7 @@
 #include "commands/TextCommand.h"
 #include "commands/TrimCommand.h"
 #include "commands/XlineCommand.h"
+#include "commands/XClipCommand.h"
 #include "commands/XrefCommand.h"
 #include "commands/VpScaleCommand.h"
 #include "core/document/Commands.h"
@@ -903,6 +904,22 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         m_commandLine.appendLine(QStringLiteral("ACTLOAD  Enter macro file path:"));
     } else if (cmd == QLatin1String("XREF") || cmd == QLatin1String("XR")) {
         startCommand(std::make_unique<XrefCommand>(m_document), QStringLiteral("XREF"));
+    } else if (cmd == QLatin1String("XCLIP")) {
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        lcad::EntityId targetId = 0;
+        int inserts = 0;
+        for (lcad::EntityId id : ids) {
+            const lcad::Entity* e = m_document.findEntity(id);
+            if (e && e->type() == lcad::EntityType::Insert) {
+                targetId = id;
+                ++inserts;
+            }
+        }
+        if (inserts != 1) {
+            m_commandLine.appendLine(QStringLiteral("*Select exactly one block/xref reference to clip*"));
+        } else {
+            startCommand(std::make_unique<XClipCommand>(m_document, targetId), QStringLiteral("XCLIP"));
+        }
     } else if (cmd == QLatin1String("EXPLODE") || cmd == QLatin1String("X")) {
         explodeSelection();
     } else if (cmd == QLatin1String("OVERKILL") || cmd == QLatin1String("OV")) {

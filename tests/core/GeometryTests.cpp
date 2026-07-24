@@ -619,6 +619,38 @@ TEST_CASE("InsertEntity transforms its block's children", "[geometry][block]") {
     REQUIRE(insert.boundingBox().max.y == Approx(6.0));
 }
 
+TEST_CASE("InsertEntity clip boundary transforms along with the instance (XCLIP)", "[geometry][block][xclip]") {
+    lcad::Document doc;
+    std::vector<std::unique_ptr<lcad::Entity>> children;
+    children.push_back(
+        std::make_unique<lcad::LineEntity>(doc.reserveEntityId(), 0, lcad::Point2D(0, 0), lcad::Point2D(1, 0)));
+    const lcad::BlockDefinition* block = doc.addBlock("unit-line", std::move(children));
+    lcad::InsertEntity insert(doc.reserveEntityId(), 0, block, lcad::Point2D(0, 0));
+
+    REQUIRE(insert.clipBoundary().empty());
+    REQUIRE(insert.clipEnabled()); // enabled by default even with no boundary set
+
+    insert.setClipBoundary({{0, 0}, {10, 0}, {10, 10}, {0, 10}});
+    REQUIRE(insert.clipBoundary().size() == 4);
+
+    // Translating the instance carries its clip boundary along.
+    insert.translate(lcad::Point2D(5, 0));
+    REQUIRE(insert.clipBoundary()[0].x == Approx(5.0));
+    REQUIRE(insert.clipBoundary()[2].x == Approx(15.0));
+
+    // Scaling about a point scales the boundary the same way as the instance.
+    insert.scale(lcad::Point2D(5, 0), 2.0);
+    REQUIRE(insert.clipBoundary()[0].x == Approx(5.0)); // the scale center itself is unmoved
+    REQUIRE(insert.clipBoundary()[2].x == Approx(25.0)); // (15-5)*2 + 5
+
+    insert.setClipEnabled(false);
+    REQUIRE_FALSE(insert.clipEnabled());
+
+    // Deleting the boundary means it's simply empty again.
+    insert.setClipBoundary({});
+    REQUIRE(insert.clipBoundary().empty());
+}
+
 TEST_CASE("InsertEntity dynamic linear parameter stretches per-instance", "[geometry][block][dynamic]") {
     lcad::Document doc;
     std::vector<std::unique_ptr<lcad::Entity>> children;

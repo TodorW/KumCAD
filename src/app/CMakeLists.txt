@@ -100,6 +100,8 @@ add_executable(kumcad WIN32
     commands/PageSetupCommand.cpp
     commands/XrefCommand.h
     commands/XrefCommand.cpp
+    commands/XClipCommand.h
+    commands/XClipCommand.cpp
     commands/PointCloudAttachCommand.h
     commands/PointCloudAttachCommand.cpp
     commands/PointCommands.h

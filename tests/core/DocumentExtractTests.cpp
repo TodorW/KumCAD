@@ -75,6 +75,8 @@ TEST_CASE("extractSubset re-resolves an INSERT's block pointer into the new docu
     const EntityId insertId = source.reserveEntityId();
     auto insert = std::make_unique<InsertEntity>(insertId, source.currentLayer(), srcBlock, Point2D(3, 4), 2.0, 0.0);
     insert->setAttribute("REFDES", "W1");
+    insert->setClipBoundary({{0, 0}, {10, 0}, {10, 10}, {0, 10}});
+    insert->setClipEnabled(false);
     source.addEntity(std::move(insert));
 
     const Document extracted = extractSubset(source, {insertId});
@@ -89,4 +91,6 @@ TEST_CASE("extractSubset re-resolves an INSERT's block pointer into the new docu
     const std::string* refdes = copiedInsert->attributeValue("REFDES");
     REQUIRE(refdes != nullptr);
     REQUIRE(*refdes == "W1");
+    REQUIRE(copiedInsert->clipBoundary().size() == 4); // XCLIP state survives WBLOCK's extractSubset
+    REQUIRE_FALSE(copiedInsert->clipEnabled());
 }

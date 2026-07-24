@@ -31,6 +31,8 @@ std::unique_ptr<Entity> remapEntity(const Entity& e, Document& dest,
         copy->setDynamicArrayCount(insert.dynamicArrayCount());
         copy->setVisibilityState(insert.visibilityState());
         copy->setLookupValue(insert.lookupValue());
+        copy->setClipBoundary(insert.clipBoundary());
+        copy->setClipEnabled(insert.clipEnabled());
         return copy;
     }
 

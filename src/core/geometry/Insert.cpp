@@ -153,22 +153,26 @@ double InsertEntity::distanceTo(const Point2D& pt) const {
 
 void InsertEntity::translate(const Point2D& delta) {
     m_position = m_position + delta;
+    for (Point2D& p : m_clipBoundary) p = p + delta;
 }
 
 void InsertEntity::rotate(const Point2D& center, double angleRadians) {
     m_position = rotateAround(m_position, center, angleRadians);
     m_rotation += angleRadians;
+    for (Point2D& p : m_clipBoundary) p = rotateAround(p, center, angleRadians);
 }
 
 void InsertEntity::scale(const Point2D& center, double factor) {
     m_position = scaleAround(m_position, center, factor);
     m_scale *= factor;
+    for (Point2D& p : m_clipBoundary) p = scaleAround(p, center, factor);
 }
 
 void InsertEntity::mirror(const Point2D& a, const Point2D& b) {
     m_position = mirrorAcross(m_position, a, b);
     const double phi = std::atan2(b.y - a.y, b.x - a.x);
     m_rotation = 2.0 * phi - m_rotation;
+    for (Point2D& p : m_clipBoundary) p = mirrorAcross(p, a, b);
 }
 
 namespace {

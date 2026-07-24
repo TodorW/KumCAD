@@ -568,6 +568,16 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
         // resolved color (v1 simplification; per-child colors would need
         // ByBlock semantics).
         const auto& insert = static_cast<const lcad::InsertEntity&>(entity);
+        const bool clipped = insert.clipEnabled() && insert.clipBoundary().size() >= 3;
+        if (clipped) {
+            QPainterPath clipPath(toScreen(insert.clipBoundary().front()));
+            for (std::size_t i = 1; i < insert.clipBoundary().size(); ++i) {
+                clipPath.lineTo(toScreen(insert.clipBoundary()[i]));
+            }
+            clipPath.closeSubpath();
+            painter.save();
+            painter.setClipPath(clipPath, Qt::IntersectClip);
+        }
         for (const auto& child : insert.instantiate()) {
             paint(painter, *child, toScreen, scale, color, penWidth, linetype, ltScale, document);
         }
@@ -603,6 +613,7 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
             painter.setBrush(Qt::NoBrush);
             painter.restore();
         }
+        if (clipped) painter.restore();
         break;
     }
     case lcad::EntityType::Point: {

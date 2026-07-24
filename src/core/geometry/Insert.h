@@ -51,6 +51,18 @@ public:
     const std::string& lookupValue() const { return m_lookupValue; }
     void setLookupValue(std::string value) { m_lookupValue = std::move(value); }
 
+    // XCLIP: an optional world-space clip boundary that limits rendering to
+    // its interior -- transformed along with the instance by
+    // translate/rotate/scale/mirror below. clipEnabled toggles it without
+    // discarding the boundary (XCLIP's ON/OFF); an empty boundary means no
+    // clip has ever been set (XCLIP's Delete just clears it). Session-only,
+    // like this class's other per-instance dynamic-block state above --
+    // this codebase's DXF writer doesn't round-trip any of that state either.
+    const std::vector<Point2D>& clipBoundary() const { return m_clipBoundary; }
+    void setClipBoundary(std::vector<Point2D> boundary) { m_clipBoundary = std::move(boundary); }
+    bool clipEnabled() const { return m_clipEnabled; }
+    void setClipEnabled(bool enabled) { m_clipEnabled = enabled; }
+
     // The block's children transformed into world space (scale, then rotate,
     // then translate) -- what rendering, hit-testing, and explode all share.
     // Attribute handling mirrors AutoCAD's two flavors of exploding: with
@@ -107,6 +119,8 @@ private:
     std::string m_visibilityState;
     std::string m_lookupValue;
     std::vector<std::pair<std::string, std::string>> m_attributes;
+    std::vector<Point2D> m_clipBoundary;
+    bool m_clipEnabled = true;
 };
 
 } // namespace lcad

@@ -233,6 +233,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
     double curBlockPendingPadPosY = 0.0;
     double curBlockPendingPadWidth = 0.0;
     double curBlockPendingPadHeight = 0.0;
+    double curBlockPendingPadShapeParam = 0.0;
     std::vector<std::unique_ptr<Entity>> curBlockEntities;
     int curPaperIndex = -1; // >= 0 while inside a *Paper_Space block
 
@@ -1061,6 +1062,8 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 curBlockPendingPadWidth = toDouble(g.value);
             } else if (g.code == 98) {
                 curBlockPendingPadHeight = toDouble(g.value);
+            } else if (g.code == 100) {
+                curBlockPendingPadShapeParam = toDouble(g.value);
             } else if (g.code == 99) {
                 Pad pad;
                 pad.number = curBlockPendingPadNumber;
@@ -1068,6 +1071,7 @@ bool readDxf(Document& document, const std::string& path, std::string* errorOut)
                 pad.position = Point2D(curBlockPendingPadPosX, curBlockPendingPadPosY);
                 pad.width = curBlockPendingPadWidth;
                 pad.height = curBlockPendingPadHeight;
+                pad.shapeParam = curBlockPendingPadShapeParam;
                 pad.drillDiameter = toDouble(g.value);
                 curBlockPads.push_back(pad);
             }

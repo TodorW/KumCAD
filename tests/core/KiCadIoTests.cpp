@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
 
 using namespace lcad;
 using Catch::Approx;
@@ -81,6 +82,54 @@ TEST_CASE("writeKiCadMod/readKiCadMod round-trip a real footprint's pads and out
         REQUIRE(readBack->pads[i].position.x == Approx(block->pads[i].position.x));
         REQUIRE(readBack->pads[i].position.y == Approx(block->pads[i].position.y));
     }
+    std::remove(path.c_str());
+}
+
+TEST_CASE("writeKiCadMod/readKiCadMod round-trip RoundRect and Trapezoid pad shape + shapeParam",
+         "[io][kicad][footprint][padshape]") {
+    Document doc;
+    doc.addBlock("RRTRAP", {});
+    BlockDefinition* block = doc.findBlock("RRTRAP");
+    Pad roundRect;
+    roundRect.number = "1";
+    roundRect.shape = PadShape::RoundRect;
+    roundRect.position = Point2D(0, 0);
+    roundRect.width = 2.0;
+    roundRect.height = 1.0;
+    roundRect.shapeParam = 0.25;
+    block->pads.push_back(roundRect);
+    Pad trapezoid;
+    trapezoid.number = "2";
+    trapezoid.shape = PadShape::Trapezoid;
+    trapezoid.position = Point2D(5, 0);
+    trapezoid.width = 2.0;
+    trapezoid.height = 1.0;
+    trapezoid.shapeParam = 0.3;
+    block->pads.push_back(trapezoid);
+
+    const std::string path = "/tmp/kumcad_kicadmod_padshape_roundtrip_test.kicad_mod";
+    std::string err;
+    REQUIRE(writeKiCadMod(doc, *block, path, &err));
+
+    // Real KiCad tokens, not this codebase's own invention -- confirms the
+    // shape and its one extra parameter are written the way real KiCad
+    // (and thus real KiCad importing this file) actually expects them.
+    std::ifstream in(path);
+    std::ostringstream contents;
+    contents << in.rdbuf();
+    REQUIRE(contents.str().find("roundrect") != std::string::npos);
+    REQUIRE(contents.str().find("roundrect_rratio") != std::string::npos);
+    REQUIRE(contents.str().find("trapezoid") != std::string::npos);
+    REQUIRE(contents.str().find("rect_delta") != std::string::npos);
+
+    Document doc2;
+    const BlockDefinition* readBack = readKiCadMod(doc2, path, &err);
+    REQUIRE(readBack != nullptr);
+    REQUIRE(readBack->pads.size() == 2);
+    REQUIRE(readBack->pads[0].shape == PadShape::RoundRect);
+    REQUIRE(readBack->pads[0].shapeParam == Approx(0.25));
+    REQUIRE(readBack->pads[1].shape == PadShape::Trapezoid);
+    REQUIRE(readBack->pads[1].shapeParam == Approx(0.3));
     std::remove(path.c_str());
 }
 

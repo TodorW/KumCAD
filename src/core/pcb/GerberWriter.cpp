@@ -5,6 +5,7 @@
 #include "core/geometry/Insert.h"
 #include "core/geometry/Track.h"
 #include "core/geometry/Via.h"
+#include "core/pcb/PadShapeGeometry.h"
 
 #include <chrono>
 #include <cmath>
@@ -22,16 +23,23 @@ std::string formatCoord(double mm) {
     return std::to_string(static_cast<long long>(std::llround(mm * 1e5)));
 }
 
-enum class ApertureShape { Circle, Rect, Oval };
+// RoundRect and Trapezoid have no native flash-aperture code in the Gerber
+// spec (only Circle/Rect/Oval/Polygon do) -- they're emitted as an
+// aperture macro instead (RS-274X primitive 4, Outline), built from the
+// exact same PadShapeGeometry outline EntityPainter and Board3D use, so
+// every consumer agrees on one real shape.
+enum class ApertureShape { Circle, Rect, Oval, RoundRect, Trapezoid };
 
 struct ApertureKey {
     ApertureShape shape;
     double dim1, dim2; // dim2 unused for Circle
+    double dim3 = 0.0; // shapeParam, only used for RoundRect/Trapezoid
 
     bool operator<(const ApertureKey& other) const {
         if (shape != other.shape) return shape < other.shape;
         if (std::abs(dim1 - other.dim1) > 1e-6) return dim1 < other.dim1;
         if (std::abs(dim2 - other.dim2) > 1e-6) return dim2 < other.dim2;
+        if (std::abs(dim3 - other.dim3) > 1e-6) return dim3 < other.dim3;
         return false;
     }
 };
@@ -51,17 +59,33 @@ public:
         std::string out;
         int id = 10;
         for (const ApertureKey& key : m_order) {
-            out += "%ADD" + std::to_string(id) + (key.shape == ApertureShape::Circle ? "C," : key.shape == ApertureShape::Rect ? "R," : "O,");
-            if (key.shape == ApertureShape::Circle) {
-                std::ostringstream oss;
-                oss << key.dim1;
-                out += oss.str();
+            if (key.shape == ApertureShape::RoundRect || key.shape == ApertureShape::Trapezoid) {
+                const std::vector<Point2D> outline = key.shape == ApertureShape::RoundRect
+                                                          ? roundRectPadOutline(key.dim1, key.dim2, key.dim3)
+                                                          : trapezoidPadOutline(key.dim1, key.dim2, key.dim3);
+                const std::string macroName =
+                    (key.shape == ApertureShape::RoundRect ? std::string("RRECT") : std::string("TRAP")) +
+                    std::to_string(id);
+                std::ostringstream macro;
+                macro << "%AM" << macroName << "*\n4,1," << outline.size() << ",";
+                for (const Point2D& p : outline) macro << p.x << "," << p.y << ",";
+                macro << outline.front().x << "," << outline.front().y << ",0*%\n"; // closing vertex + 0 rotation
+                out += macro.str();
+                out += "%ADD" + std::to_string(id) + macroName + "*%\n";
             } else {
-                std::ostringstream oss;
-                oss << key.dim1 << "X" << key.dim2;
-                out += oss.str();
+                out += "%ADD" + std::to_string(id) +
+                       (key.shape == ApertureShape::Circle ? "C," : key.shape == ApertureShape::Rect ? "R," : "O,");
+                if (key.shape == ApertureShape::Circle) {
+                    std::ostringstream oss;
+                    oss << key.dim1;
+                    out += oss.str();
+                } else {
+                    std::ostringstream oss;
+                    oss << key.dim1 << "X" << key.dim2;
+                    out += oss.str();
+                }
+                out += "*%\n";
             }
-            out += "*%\n";
             ++id;
         }
         return out;
@@ -164,9 +188,15 @@ bool writeGerberLayer(const Document& doc, LayerId layer, const std::string& pat
     std::map<const Pad*, int> padAperture;
     auto registerPadApertures = [&](const InsertEntity* fp) {
         for (const Pad& pad : fp->block()->pads) {
-            const ApertureShape shape =
-                pad.shape == PadShape::Round ? ApertureShape::Circle : pad.shape == PadShape::Rect ? ApertureShape::Rect : ApertureShape::Oval;
-            padAperture[&pad] = apertures.idFor({shape, pad.width, pad.height});
+            ApertureShape shape = ApertureShape::Circle;
+            switch (pad.shape) {
+            case PadShape::Round: shape = ApertureShape::Circle; break;
+            case PadShape::Rect: shape = ApertureShape::Rect; break;
+            case PadShape::Oval: shape = ApertureShape::Oval; break;
+            case PadShape::RoundRect: shape = ApertureShape::RoundRect; break;
+            case PadShape::Trapezoid: shape = ApertureShape::Trapezoid; break;
+            }
+            padAperture[&pad] = apertures.idFor({shape, pad.width, pad.height, pad.shapeParam});
         }
     };
     for (const auto* fp : footprints) registerPadApertures(fp);

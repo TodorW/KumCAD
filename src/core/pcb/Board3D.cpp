@@ -4,6 +4,7 @@
 #include "core/geometry/Insert.h"
 #include "core/geometry/Track.h"
 #include "core/geometry/Via.h"
+#include "core/pcb/PadShapeGeometry.h"
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -24,6 +25,41 @@
 namespace lcad {
 
 namespace {
+
+// A polygon-outline pad's real 3D solid: the outline (in pad-local space)
+// translated to world XY at height z, closed into a wire, faced, then
+// extruded straight up by thickness -- same wire-face-prism technique the
+// board substrate itself uses just below.
+TopoDS_Shape buildPolygonPadShape(const std::vector<Point2D>& outline, const Point2D& position, double z,
+                                  double thickness) {
+    if (outline.size() < 3) return TopoDS_Shape();
+    BRepBuilderAPI_MakePolygon polygon;
+    for (const Point2D& p : outline) polygon.Add(gp_Pnt(position.x + p.x, position.y + p.y, z));
+    polygon.Close();
+    if (!polygon.IsDone()) return TopoDS_Shape();
+    BRepBuilderAPI_MakeFace faceBuilder(polygon.Wire());
+    if (!faceBuilder.IsDone()) return TopoDS_Shape();
+    return BRepPrimAPI_MakePrism(faceBuilder.Face(), gp_Vec(0.0, 0.0, thickness)).Shape();
+}
+
+TopoDS_Shape buildPadShape(const Pad& pad, const Point2D& position, double z, double thickness) {
+    switch (pad.shape) {
+    case PadShape::Round: {
+        const gp_Ax2 axis(gp_Pnt(position.x, position.y, z), gp_Dir(0, 0, 1));
+        return BRepPrimAPI_MakeCylinder(axis, std::max(pad.width, pad.height) / 2.0, thickness).Shape();
+    }
+    case PadShape::RoundRect:
+        return buildPolygonPadShape(roundRectPadOutline(pad.width, pad.height, pad.shapeParam), position, z, thickness);
+    case PadShape::Trapezoid:
+        return buildPolygonPadShape(trapezoidPadOutline(pad.width, pad.height, pad.shapeParam), position, z, thickness);
+    case PadShape::Rect:
+    case PadShape::Oval:
+        return BRepPrimAPI_MakeBox(gp_Pnt(position.x - pad.width / 2.0, position.y - pad.height / 2.0, z), pad.width,
+                                   pad.height, thickness)
+            .Shape();
+    }
+    return TopoDS_Shape();
+}
 
 // Same local-frame-segment technique Bim.cpp's Wall/Beam already use --
 // X along a-b, Y across width, Z up.
@@ -111,18 +147,7 @@ Board3DShapes buildBoard3D(const Document& doc, const std::vector<std::pair<doub
                 std::vector<double> zs = throughHole ? std::vector<double>{0.0, params.boardThickness}
                                                      : std::vector<double>{placementZ};
                 for (double z : zs) {
-                    TopoDS_Shape padShape;
-                    if (padWorld.pad->shape == PadShape::Round) {
-                        const gp_Ax2 axis(gp_Pnt(padWorld.position.x, padWorld.position.y, z), gp_Dir(0, 0, 1));
-                        padShape = BRepPrimAPI_MakeCylinder(axis, std::max(padWorld.pad->width, padWorld.pad->height) / 2.0,
-                                                           params.copperThickness)
-                                     .Shape();
-                    } else {
-                        padShape = BRepPrimAPI_MakeBox(gp_Pnt(padWorld.position.x - padWorld.pad->width / 2.0,
-                                                             padWorld.position.y - padWorld.pad->height / 2.0, z),
-                                                      padWorld.pad->width, padWorld.pad->height, params.copperThickness)
-                                     .Shape();
-                    }
+                    const TopoDS_Shape padShape = buildPadShape(*padWorld.pad, padWorld.position, z, params.copperThickness);
                     if (!padShape.IsNull()) result.copper.push_back(padShape);
                 }
             }

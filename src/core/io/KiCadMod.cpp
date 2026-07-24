@@ -52,12 +52,16 @@ std::string padShapeToken(PadShape shape) {
         case PadShape::Round: return "circle";
         case PadShape::Rect: return "rect";
         case PadShape::Oval: return "oval";
+        case PadShape::RoundRect: return "roundrect";
+        case PadShape::Trapezoid: return "trapezoid";
     }
     return "circle";
 }
 
 PadShape padShapeFromToken(const std::string& tok) {
-    if (tok == "rect" || tok == "roundrect" || tok == "trapezoid") return PadShape::Rect;
+    if (tok == "roundrect") return PadShape::RoundRect;
+    if (tok == "trapezoid") return PadShape::Trapezoid;
+    if (tok == "rect" || tok == "custom") return PadShape::Rect; // custom (arbitrary polygon) isn't modeled -- its bounding rect is the closest real shape here
     if (tok == "oval") return PadShape::Oval;
     return PadShape::Round;
 }
@@ -76,6 +80,11 @@ SExpr makePadExpr(const Pad& pad) {
     } else {
         rest.push_back(SExpr::list("layers", {SExpr::str("F.Cu"), SExpr::str("F.Paste"), SExpr::str("F.Mask")}));
     }
+    if (pad.shape == PadShape::RoundRect) {
+        rest.push_back(SExpr::list("roundrect_rratio", {SExpr::num(pad.shapeParam)}));
+    } else if (pad.shape == PadShape::Trapezoid) {
+        rest.push_back(SExpr::list("rect_delta", {SExpr::num(pad.shapeParam), SExpr::num(0.0)}));
+    }
     return SExpr::list("pad", std::move(rest));
 }
 
@@ -91,6 +100,11 @@ Pad readPad(const SExpr& padExpr) {
     }
     if (typeTok == "thru_hole" || typeTok == "np_thru_hole") {
         if (const SExpr* drill = padExpr.child("drill")) pad.drillDiameter = drill->numberAt(0, 0.0);
+    }
+    if (pad.shape == PadShape::RoundRect) {
+        if (const SExpr* ratio = padExpr.child("roundrect_rratio")) pad.shapeParam = ratio->numberAt(0, 0.0);
+    } else if (pad.shape == PadShape::Trapezoid) {
+        if (const SExpr* delta = padExpr.child("rect_delta")) pad.shapeParam = delta->numberAt(0, 0.0);
     }
     return pad;
 }

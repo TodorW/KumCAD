@@ -356,6 +356,35 @@ TEST_CASE("writeGerberLayer emits a well-formed RS-274X file with apertures, dra
     REQUIRE(text.find("M02*") != std::string::npos);
 }
 
+TEST_CASE("writeGerberLayer emits a real aperture macro (RS-274X primitive 4, Outline) for a RoundRect pad",
+         "[pcb][gerber][padshape]") {
+    TempPath temp;
+    Document doc;
+    doc.addBlock("RRFP", {});
+    BlockDefinition* block = doc.findBlock("RRFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::RoundRect;
+    pad.width = 2.0;
+    pad.height = 1.0;
+    pad.shapeParam = 0.25;
+    block->pads.push_back(pad);
+
+    auto insert = std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0));
+    insert->setAttribute("REFDES", "U1");
+    doc.addEntity(std::move(insert));
+
+    REQUIRE(writeGerberLayer(doc, doc.currentLayer(), temp.path.string()));
+    const std::string text = readFile(temp.path);
+
+    REQUIRE(text.find("%AMRRECT") != std::string::npos); // the macro definition itself
+    REQUIRE(text.find("4,1,") != std::string::npos);      // primitive 4 (Outline), exposure on
+    // The aperture flash references the macro by name, not a built-in C/R/O code.
+    REQUIRE(text.find("%ADD10RRECT10*%") != std::string::npos);
+    REQUIRE(text.find("D10*") != std::string::npos);
+    REQUIRE(text.find("D03*") != std::string::npos);
+}
+
 TEST_CASE("writeGerberLayer emits real Gerber X2 file attributes with FileFunction inferred from the layer name",
          "[pcb][gerber]") {
     TempPath temp;

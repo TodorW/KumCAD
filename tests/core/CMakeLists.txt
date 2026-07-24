@@ -35,6 +35,7 @@ add_executable(lcad_core_tests
     SpiceTests.cpp
     SheetsTests.cpp
     PcbTests.cpp
+    PadShapeGeometryTests.cpp
     AutorouterTests.cpp
     LengthTuningTests.cpp
     DiffPairTests.cpp

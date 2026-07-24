@@ -102,6 +102,8 @@ add_library(lcad_core STATIC
     pcb/Drc.cpp
     pcb/GerberWriter.h
     pcb/GerberWriter.cpp
+    pcb/PadShapeGeometry.h
+    pcb/PadShapeGeometry.cpp
     pcb/SpecctraWriter.h
     pcb/SpecctraWriter.cpp
     pcb/BoardOutline.h

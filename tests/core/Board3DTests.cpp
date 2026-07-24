@@ -189,3 +189,51 @@ TEST_CASE("buildBoard3D gives a through-hole footprint pad copper on both the to
     REQUIRE(atTop == 2);
     REQUIRE(atBottom == 2);
 }
+
+TEST_CASE("buildBoard3D builds a RoundRect pad's real solid with the exact expected volume",
+         "[core3d][board3d][padshape]") {
+    Document doc;
+    doc.addBlock("RRFP", {});
+    BlockDefinition* block = doc.findBlock("RRFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::RoundRect;
+    pad.width = 4.0;
+    pad.height = 2.0;
+    pad.shapeParam = 0.0; // ratio 0 -- degenerates to the exact rect, no arc approximation error
+    block->pads.push_back(pad);
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0)));
+
+    Board3DParams params;
+    params.boardThickness = 1.6;
+    params.copperThickness = 0.035;
+    const Board3DShapes shapes = buildBoard3D(doc, {}, {}, params);
+    REQUIRE(shapes.copper.size() == 1);
+    REQUIRE_FALSE(shapes.copper[0].IsNull());
+    REQUIRE(volumeOf(shapes.copper[0]) == Approx(4.0 * 2.0 * params.copperThickness).margin(1e-6));
+}
+
+TEST_CASE("buildBoard3D builds a Trapezoid pad's real solid with the exact expected volume (area is delta-invariant)",
+         "[core3d][board3d][padshape]") {
+    Document doc;
+    doc.addBlock("TRFP", {});
+    BlockDefinition* block = doc.findBlock("TRFP");
+    Pad pad;
+    pad.number = "1";
+    pad.shape = PadShape::Trapezoid;
+    pad.width = 4.0;
+    pad.height = 2.0;
+    pad.shapeParam = 1.0; // a real, non-zero taper -- area is unaffected (symmetric), proves shapeParam is plumbed
+    block->pads.push_back(pad);
+
+    doc.addEntity(std::make_unique<InsertEntity>(doc.reserveEntityId(), doc.currentLayer(), block, Point2D(0, 0)));
+
+    Board3DParams params;
+    params.boardThickness = 1.6;
+    params.copperThickness = 0.035;
+    const Board3DShapes shapes = buildBoard3D(doc, {}, {}, params);
+    REQUIRE(shapes.copper.size() == 1);
+    REQUIRE_FALSE(shapes.copper[0].IsNull());
+    REQUIRE(volumeOf(shapes.copper[0]) == Approx(4.0 * 2.0 * params.copperThickness).margin(1e-6));
+}

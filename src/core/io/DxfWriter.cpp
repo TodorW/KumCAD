@@ -1037,6 +1037,7 @@ bool writeDxf(const Document& document, const std::string& path, std::string* er
                 writeGroup(out, 96, pad.position.y);
                 writeGroup(out, 97, pad.width);
                 writeGroup(out, 98, pad.height);
+                writeGroup(out, 100, pad.shapeParam);
                 writeGroup(out, 99, pad.drillDiameter);
             }
             for (const auto& child : block->entities) writeEntity(out, document, *child);

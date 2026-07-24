@@ -14,6 +14,7 @@
 #include "core/geometry/NoConnect.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/Leader.h"
+#include "core/pcb/PadShapeGeometry.h"
 #include "core/geometry/Line.h"
 #include "core/geometry/MLeader.h"
 #include "core/geometry/MText.h"
@@ -604,11 +605,35 @@ void paint(QPainter& painter, const lcad::Entity& entity, const WorldToScreen& t
             painter.save();
             painter.setBrush(color);
             for (const auto& padWorld : insert.padWorldPositions()) {
-                const QPointF s = toScreen(padWorld.position);
-                const double w = std::max(2.0, padWorld.pad->width * scale / 2.0);
-                const double h = std::max(2.0, padWorld.pad->height * scale / 2.0);
-                if (padWorld.pad->shape == lcad::PadShape::Round) painter.drawEllipse(s, w, h);
-                else painter.drawRect(QRectF(s.x() - w, s.y() - h, 2 * w, 2 * h));
+                const lcad::Pad& pad = *padWorld.pad;
+                switch (pad.shape) {
+                case lcad::PadShape::Round: {
+                    const QPointF s = toScreen(padWorld.position);
+                    const double w = std::max(2.0, pad.width * scale / 2.0);
+                    const double h = std::max(2.0, pad.height * scale / 2.0);
+                    painter.drawEllipse(s, w, h);
+                    break;
+                }
+                case lcad::PadShape::RoundRect:
+                case lcad::PadShape::Trapezoid: {
+                    const std::vector<lcad::Point2D> outline =
+                        pad.shape == lcad::PadShape::RoundRect
+                            ? lcad::roundRectPadOutline(pad.width, pad.height, pad.shapeParam)
+                            : lcad::trapezoidPadOutline(pad.width, pad.height, pad.shapeParam);
+                    QPolygonF poly;
+                    for (const lcad::Point2D& p : outline) poly << toScreen(padWorld.position + p);
+                    painter.drawPolygon(poly);
+                    break;
+                }
+                case lcad::PadShape::Rect:
+                case lcad::PadShape::Oval: {
+                    const QPointF s = toScreen(padWorld.position);
+                    const double w = std::max(2.0, pad.width * scale / 2.0);
+                    const double h = std::max(2.0, pad.height * scale / 2.0);
+                    painter.drawRect(QRectF(s.x() - w, s.y() - h, 2 * w, 2 * h));
+                    break;
+                }
+                }
             }
             painter.setBrush(Qt::NoBrush);
             painter.restore();

@@ -99,8 +99,11 @@ struct Pin {
     Point2D stubStart;
 };
 
-// A PCB footprint pad's shape.
-enum class PadShape { Round, Rect, Oval };
+// A PCB footprint pad's shape. RoundRect and Trapezoid use Pad::shapeParam
+// (see below) for their one extra shape parameter; Custom (arbitrary
+// polygon pads, real KiCad's "custom" shape) is a real, disclosed gap --
+// out of scope here, unlike these two.
+enum class PadShape { Round, Rect, Oval, RoundRect, Trapezoid };
 
 // One copper connection point on a PCB footprint. number matches the
 // schematic symbol pin number it corresponds to (by convention, like real
@@ -120,6 +123,15 @@ struct Pad {
     double width = 1.6;
     double height = 1.6;
     double drillDiameter = 0.0;
+    // Meaning depends on shape (unused, 0.0, for Round/Rect/Oval):
+    //   RoundRect: corner radius ratio, 0..0.5 of min(width, height) --
+    //              matches real KiCad's roundrect_rratio.
+    //   Trapezoid: delta (mm), symmetric taper along the width axis --
+    //              the bottom edge (-Y) is width+delta wide, the top edge
+    //              (+Y) is width-delta wide, matching real KiCad's
+    //              rect_delta.x convention (this codebase doesn't model
+    //              the independent Y-axis delta KiCad also offers).
+    double shapeParam = 0.0;
 };
 
 // A reusable group of entities (an AutoCAD block definition). Child geometry

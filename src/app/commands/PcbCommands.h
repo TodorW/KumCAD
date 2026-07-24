@@ -329,6 +329,12 @@ private:
 //   QFP:pinCount:pitch:bodyWidth:bodyLength:padWidth:padLength
 //   SOIC:pinCount:pitch:bodyWidth:bodyLength:padWidth:padLength
 //   HEADER:pinCount:rowCount:pitch
+//   CHIP:padWidth:padLength:padSpacing:bodyWidth:bodyLength
+//   SOT23:pitch:padWidth:padLength:bodyWidth:bodyLength
+//   SOT223:pitch:padWidth:padLength:bodyWidth:bodyLength:tabPadLength
+//   BGA:rows:cols:pitch:ballDiameter:bodyWidth:bodyLength
+//   MOUNTHOLE:drillDiameter:padDiameter
+//   FIDUCIAL:padDiameter
 class FootprintGenCommand : public DrawCommand {
 public:
     explicit FootprintGenCommand(lcad::Document& document) : m_document(document) {}

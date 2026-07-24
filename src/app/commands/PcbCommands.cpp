@@ -617,7 +617,9 @@ std::optional<QString> FootprintGenCommand::onText(const QString& text) {
         m_name = name;
         m_stage = Stage::FamilyAndParams;
         return QStringLiteral("Family + params <QFP:44:0.8:10:10:0.4:1.5 | SOIC:8:1.27:5:4:0.6:1.5 | "
-                              "HEADER:4:1:2.54>:");
+                              "HEADER:4:1:2.54 | CHIP:0.9:0.8:0.9:0.8:1.6 | SOT23:0.95:0.4:0.6:1.6:2.9 | "
+                              "SOT223:2.3:0.9:1.2:3.2:6.5:1.5 | BGA:4:4:0.8:0.4:4:4 | "
+                              "MOUNTHOLE:3.2:3.2 | FIDUCIAL:1.0>:");
     }
 
     m_finished = true;
@@ -661,7 +663,100 @@ std::optional<QString> FootprintGenCommand::onText(const QString& text) {
             .arg(QString::fromStdString(m_name))
             .arg(params.pinCount * params.rowCount);
     }
-    return QStringLiteral("*Unknown family \"%1\" -- expected QFP, SOIC, or HEADER*").arg(family);
+    if (family == QLatin1String("CHIP")) {
+        if (fields.size() != 6) return QStringLiteral("*Expected CHIP:padWidth:padLength:padSpacing:bodyWidth:"
+                                                       "bodyLength*");
+        lcad::ChipPassiveParams params;
+        params.padWidth = fields[1].toDouble(&ok);
+        if (ok) params.padLength = fields[2].toDouble(&ok);
+        if (ok) params.padSpacing = fields[3].toDouble(&ok);
+        if (ok) params.bodyWidth = fields[4].toDouble(&ok);
+        if (ok) params.bodyLength = fields[5].toDouble(&ok);
+        if (!ok || !lcad::generateChipPassiveFootprint(m_document, m_name, params)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters and that \"%1\" "
+                                  "isn't already a registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (2 pads)*").arg(QString::fromStdString(m_name));
+    }
+    if (family == QLatin1String("SOT23")) {
+        if (fields.size() != 6) return QStringLiteral("*Expected SOT23:pitch:padWidth:padLength:bodyWidth:"
+                                                       "bodyLength*");
+        lcad::SotParams params;
+        params.pitch = fields[1].toDouble(&ok);
+        if (ok) params.padWidth = fields[2].toDouble(&ok);
+        if (ok) params.padLength = fields[3].toDouble(&ok);
+        if (ok) params.bodyWidth = fields[4].toDouble(&ok);
+        if (ok) params.bodyLength = fields[5].toDouble(&ok);
+        if (!ok || !lcad::generateSot23Footprint(m_document, m_name, params)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters and that \"%1\" "
+                                  "isn't already a registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (3 pads)*").arg(QString::fromStdString(m_name));
+    }
+    if (family == QLatin1String("SOT223")) {
+        if (fields.size() != 7) return QStringLiteral("*Expected SOT223:pitch:padWidth:padLength:bodyWidth:"
+                                                       "bodyLength:tabPadLength*");
+        lcad::Sot223Params params;
+        params.pitch = fields[1].toDouble(&ok);
+        if (ok) params.padWidth = fields[2].toDouble(&ok);
+        if (ok) params.padLength = fields[3].toDouble(&ok);
+        if (ok) params.bodyWidth = fields[4].toDouble(&ok);
+        if (ok) params.bodyLength = fields[5].toDouble(&ok);
+        if (ok) params.tabPadLength = fields[6].toDouble(&ok);
+        if (!ok || !lcad::generateSot223Footprint(m_document, m_name, params)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters and that \"%1\" "
+                                  "isn't already a registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (4 pads)*").arg(QString::fromStdString(m_name));
+    }
+    if (family == QLatin1String("BGA")) {
+        if (fields.size() != 7) return QStringLiteral("*Expected BGA:rows:cols:pitch:ballDiameter:bodyWidth:"
+                                                       "bodyLength*");
+        lcad::BgaParams params;
+        params.rows = fields[1].toInt(&ok);
+        if (ok) params.cols = fields[2].toInt(&ok);
+        if (ok) params.pitch = fields[3].toDouble(&ok);
+        if (ok) params.ballDiameter = fields[4].toDouble(&ok);
+        if (ok) params.bodyWidth = fields[5].toDouble(&ok);
+        if (ok) params.bodyLength = fields[6].toDouble(&ok);
+        if (!ok || !lcad::generateBgaFootprint(m_document, m_name, params)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters (rows/cols must be "
+                                  "positive, rows can't exceed 20 JEDEC letters) and that \"%1\" isn't already a "
+                                  "registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (%2 pads)*")
+            .arg(QString::fromStdString(m_name))
+            .arg(params.rows * params.cols);
+    }
+    if (family == QLatin1String("MOUNTHOLE")) {
+        if (fields.size() != 3) return QStringLiteral("*Expected MOUNTHOLE:drillDiameter:padDiameter*");
+        const double drillDiameter = fields[1].toDouble(&ok);
+        double padDiameter = 0.0;
+        if (ok) padDiameter = fields[2].toDouble(&ok);
+        if (!ok || !lcad::generateMountingHoleFootprint(m_document, m_name, drillDiameter, padDiameter)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters and that \"%1\" "
+                                  "isn't already a registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (mounting hole)*").arg(QString::fromStdString(m_name));
+    }
+    if (family == QLatin1String("FIDUCIAL")) {
+        if (fields.size() != 2) return QStringLiteral("*Expected FIDUCIAL:padDiameter*");
+        const double padDiameter = fields[1].toDouble(&ok);
+        if (!ok || !lcad::generateFiducialFootprint(m_document, m_name, padDiameter)) {
+            return QStringLiteral("*Could not generate that footprint -- check the parameters and that \"%1\" "
+                                  "isn't already a registered block*")
+                .arg(QString::fromStdString(m_name));
+        }
+        return QStringLiteral("*Footprint \"%1\" generated (fiducial)*").arg(QString::fromStdString(m_name));
+    }
+    return QStringLiteral("*Unknown family \"%1\" -- expected QFP, SOIC, HEADER, CHIP, SOT23, SOT223, BGA, "
+                          "MOUNTHOLE, or FIDUCIAL*")
+        .arg(family);
 }
 
 std::optional<QString> KiCadSchExportCommand::onText(const QString& text) {

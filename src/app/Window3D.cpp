@@ -46,12 +46,14 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QTextStream>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -308,6 +310,137 @@ private:
 
     Document3D& m_document;
     QListWidget* m_list = nullptr;
+};
+
+// A real grid editor for Document3D's own named Spreadsheets (see
+// core/document/Spreadsheet.h): fixed 10 columns (A-J) x 30 rows,
+// editing a cell writes its RAW content straight through (a number, a
+// literal string, or a "=..." formula) via Document3D::setCell --
+// unlike a real spreadsheet's formula-bar-vs-at-rest-display split,
+// every cell always shows its own raw content, not a live computed
+// preview; the status label below the grid shows the CURRENTLY
+// SELECTED cell's computed value (or its error) instead, a real,
+// disclosed simplification that keeps the widget wiring simple without
+// losing the ability to actually see a formula's result.
+class SpreadsheetDialog : public QDialog {
+public:
+    explicit SpreadsheetDialog(Document3D& document, QWidget* parent = nullptr)
+        : QDialog(parent), m_document(document) {
+        setWindowTitle(QStringLiteral("Spreadsheet"));
+        resize(560, 440);
+
+        m_sheetCombo = new QComboBox(this);
+        for (const auto& [name, sheet] : m_document.spreadsheets()) {
+            (void)sheet;
+            m_sheetCombo->addItem(QString::fromStdString(name));
+        }
+        if (m_sheetCombo->count() == 0) m_sheetCombo->addItem(QStringLiteral("Sheet1"));
+        connect(m_sheetCombo, &QComboBox::currentTextChanged, this, &SpreadsheetDialog::refreshGrid);
+
+        auto* newSheetButton = new QPushButton(QStringLiteral("New Sheet..."), this);
+        connect(newSheetButton, &QPushButton::clicked, this, &SpreadsheetDialog::newSheet);
+
+        m_table = new QTableWidget(kRows, kCols, this);
+        QStringList headers;
+        for (int c = 0; c < kCols; ++c) headers << QString(QChar('A' + c));
+        m_table->setHorizontalHeaderLabels(headers);
+        QStringList vheaders;
+        for (int r = 0; r < kRows; ++r) vheaders << QString::number(r + 1);
+        m_table->setVerticalHeaderLabels(vheaders);
+        connect(m_table, &QTableWidget::itemChanged, this, &SpreadsheetDialog::onItemChanged);
+        connect(m_table, &QTableWidget::currentCellChanged, this, [this] { updateStatus(); });
+
+        m_status = new QLabel(this);
+
+        auto* topRow = new QHBoxLayout();
+        topRow->addWidget(new QLabel(QStringLiteral("Sheet:"), this));
+        topRow->addWidget(m_sheetCombo);
+        topRow->addWidget(newSheetButton);
+        topRow->addStretch();
+
+        auto* layout = new QVBoxLayout(this);
+        layout->addLayout(topRow);
+        layout->addWidget(m_table);
+        layout->addWidget(m_status);
+
+        refreshGrid();
+    }
+
+private:
+    static constexpr int kCols = 10;
+    static constexpr int kRows = 30;
+
+    static QString cellName(int row, int col) { return QString(QChar('A' + col)) + QString::number(row + 1); }
+
+    void newSheet() {
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, QStringLiteral("New Sheet"), QStringLiteral("Sheet name:"),
+                                                    QLineEdit::Normal, QString(), &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        m_document.spreadsheet(name.trimmed().toStdString()); // creates it if it doesn't already exist
+        if (m_sheetCombo->findText(name.trimmed()) < 0) m_sheetCombo->addItem(name.trimmed());
+        m_sheetCombo->setCurrentText(name.trimmed());
+    }
+
+    void refreshGrid() {
+        m_updating = true;
+        const std::string sheetName = m_sheetCombo->currentText().toStdString();
+        const bool hasSheet = m_document.hasSpreadsheet(sheetName);
+        for (int r = 0; r < kRows; ++r) {
+            for (int c = 0; c < kCols; ++c) {
+                QTableWidgetItem* item = m_table->item(r, c);
+                if (!item) {
+                    item = new QTableWidgetItem();
+                    m_table->setItem(r, c, item);
+                }
+                const std::string raw =
+                    hasSheet ? m_document.spreadsheets().at(sheetName).rawContent(cellName(r, c).toStdString())
+                             : std::string();
+                item->setText(QString::fromStdString(raw));
+            }
+        }
+        m_updating = false;
+        updateStatus();
+    }
+
+    void onItemChanged(QTableWidgetItem* item) {
+        if (m_updating || !item) return;
+        const std::string sheetName = m_sheetCombo->currentText().toStdString();
+        const QString name = cellName(item->row(), item->column());
+        m_document.setCell(sheetName, name.toStdString(), item->text().toStdString());
+        updateStatus();
+    }
+
+    void updateStatus() {
+        const int row = m_table->currentRow();
+        const int col = m_table->currentColumn();
+        if (row < 0 || col < 0) {
+            m_status->clear();
+            return;
+        }
+        const std::string sheetName = m_sheetCombo->currentText().toStdString();
+        const QString name = cellName(row, col);
+        if (!m_document.hasSpreadsheet(sheetName)) {
+            m_status->setText(QStringLiteral("%1 (empty)").arg(name));
+            return;
+        }
+        const lcad::Spreadsheet& sheet = m_document.spreadsheets().at(sheetName);
+        std::string error;
+        const auto value = sheet.value(name.toStdString(), &error);
+        if (value) {
+            m_status->setText(QStringLiteral("%1 = %2").arg(name).arg(*value));
+        } else if (sheet.hasCell(name.toStdString())) {
+            m_status->setText(QStringLiteral("%1: %2").arg(name, QString::fromStdString(error)));
+        } else {
+            m_status->setText(QStringLiteral("%1 (empty)").arg(name));
+        }
+    }
+
+    Document3D& m_document;
+    QComboBox* m_sheetCombo = nullptr;
+    QTableWidget* m_table = nullptr;
+    QLabel* m_status = nullptr;
+    bool m_updating = false;
 };
 
 // A real AutoLISP script console for the 3D side (see core/core3d/
@@ -1341,6 +1474,7 @@ Window3D::Window3D(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("Sketch on Face..."), this, &Window3D::openSketchOnFace);
     toolbar->addAction(QStringLiteral("Add Sketch Feature..."), this, &Window3D::addSketchFeature);
     toolbar->addAction(QStringLiteral("Variables..."), this, &Window3D::openVariablesDialog);
+    toolbar->addAction(QStringLiteral("Spreadsheet..."), this, &Window3D::openSpreadsheetDialog);
     toolbar->addAction(QStringLiteral("3D Lisp Console..."), this, &Window3D::openLisp3DConsole);
     toolbar->addSeparator();
     toolbar->addAction(QStringLiteral("Undo"), this, &Window3D::undo);
@@ -1576,6 +1710,15 @@ void Window3D::openVariablesDialog() {
     // setVariable/removeVariable recompute internally, so the feature
     // tree may have changed shape even though this dialog isn't itself
     // undoable (matching addSketch's own "not yet a Command" disclosure).
+    refreshFeatureList();
+    refreshViewport();
+}
+
+void Window3D::openSpreadsheetDialog() {
+    SpreadsheetDialog dialog(m_document, this);
+    dialog.exec();
+    // setCell recomputes internally, same "not yet a Command" disclosure
+    // openVariablesDialog's own comment already makes.
     refreshFeatureList();
     refreshViewport();
 }

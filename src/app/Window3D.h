@@ -40,6 +40,7 @@ private:
     void openSketchOnFace();
     void addSketchFeature();
     void openVariablesDialog();
+    void openSpreadsheetDialog();
     void openLisp3DConsole();
     void undo();
     void redo();

@@ -10,6 +10,7 @@
 #include <gp_Quaternion.hxx>
 #include <gp_Vec.hxx>
 
+#include <algorithm>
 #include <cmath>
 
 namespace lcad {
@@ -151,6 +152,20 @@ AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly) {
         if (matedCount[i] > 1) report.multiplyMatedComponentIndices.push_back(static_cast<int>(i));
     }
     return report;
+}
+
+std::vector<PartsListEntry> buildPartsList(const Assembly& assembly) {
+    std::vector<PartsListEntry> entries;
+    for (const AssemblyComponent& component : assembly.components()) {
+        auto it = std::find_if(entries.begin(), entries.end(),
+                               [&](const PartsListEntry& e) { return e.name == component.name; });
+        if (it != entries.end()) {
+            ++it->quantity;
+        } else {
+            entries.push_back({component.name, 1});
+        }
+    }
+    return entries;
 }
 
 std::vector<TopoDS_Shape> assemblyPlacedShapes(const Assembly& assembly) {

@@ -11,8 +11,10 @@
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QTextStream>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QListWidget>
@@ -240,6 +242,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent) : QMainWindow(parent) {
     toolbar->addAction(QStringLiteral("Check DOF..."), this, &AssemblyWindow::checkDof);
     toolbar->addAction(QStringLiteral("Check Interferences..."), this, &AssemblyWindow::checkInterferences);
     toolbar->addAction(QStringLiteral("Export STEP..."), this, &AssemblyWindow::exportStep);
+    toolbar->addAction(QStringLiteral("Export Parts List..."), this, &AssemblyWindow::exportPartsList);
 
     if (m_viewport->isAvailable()) {
         statusBar()->showMessage(QStringLiteral("Add components from STEP files, define mates between them, then "
@@ -346,6 +349,25 @@ void AssemblyWindow::exportStep() {
         return;
     }
     statusBar()->showMessage(QStringLiteral("Exported assembly STEP to %1").arg(path), 3000);
+}
+
+void AssemblyWindow::exportPartsList() {
+    const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export Parts List"), QString(),
+                                                       QStringLiteral("CSV Files (*.csv)"));
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        statusBar()->showMessage(QStringLiteral("Could not open %1 for writing").arg(path), 4000);
+        return;
+    }
+    QTextStream out(&file);
+    out << "Part Name,Quantity\n";
+    for (const lcad::PartsListEntry& entry : lcad::buildPartsList(m_assembly)) {
+        const QString name = entry.name.empty() ? QStringLiteral("(unnamed)") : QString::fromStdString(entry.name);
+        out << name << "," << entry.quantity << "\n";
+    }
+    statusBar()->showMessage(QStringLiteral("Exported parts list to %1").arg(path), 3000);
 }
 
 void AssemblyWindow::refreshComponentList() {

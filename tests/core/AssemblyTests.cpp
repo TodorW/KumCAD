@@ -595,3 +595,51 @@ TEST_CASE("assemblyPlacedShapes transforms each component's own shape by its cur
     REQUIRE(xminB == Approx(5.0).margin(1e-6));
     REQUIRE(xmaxB == Approx(9.0).margin(1e-6));
 }
+
+TEST_CASE("buildPartsList groups components by name and counts duplicates, in first-appearance order",
+         "[core3d][assembly][partslist]") {
+    Assembly asm_;
+    AssemblyComponent bolt1;
+    bolt1.name = "Bolt";
+    asm_.addComponent(bolt1);
+    AssemblyComponent nut;
+    nut.name = "Nut";
+    asm_.addComponent(nut);
+    AssemblyComponent bolt2;
+    bolt2.name = "Bolt";
+    asm_.addComponent(bolt2);
+    AssemblyComponent bolt3;
+    bolt3.name = "Bolt";
+    asm_.addComponent(bolt3);
+
+    const std::vector<PartsListEntry> entries = buildPartsList(asm_);
+    REQUIRE(entries.size() == 2);
+    // Bolt appeared first (component 0), so it leads the list even
+    // though Nut only has one instance -- a real BOM's own encounter-
+    // order convention, not an alphabetical resort.
+    REQUIRE(entries[0].name == "Bolt");
+    REQUIRE(entries[0].quantity == 3);
+    REQUIRE(entries[1].name == "Nut");
+    REQUIRE(entries[1].quantity == 1);
+}
+
+TEST_CASE("buildPartsList groups every empty-named component together and returns empty for an empty assembly",
+         "[core3d][assembly][partslist]") {
+    Assembly asm_;
+    REQUIRE(buildPartsList(asm_).empty());
+
+    AssemblyComponent a;
+    asm_.addComponent(a); // name left empty
+    AssemblyComponent b;
+    asm_.addComponent(b); // name left empty
+    AssemblyComponent named;
+    named.name = "Bracket";
+    asm_.addComponent(named);
+
+    const std::vector<PartsListEntry> entries = buildPartsList(asm_);
+    REQUIRE(entries.size() == 2);
+    REQUIRE(entries[0].name.empty());
+    REQUIRE(entries[0].quantity == 2);
+    REQUIRE(entries[1].name == "Bracket");
+    REQUIRE(entries[1].quantity == 1);
+}

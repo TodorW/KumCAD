@@ -155,6 +155,22 @@ struct AssemblyDofReport {
 
 AssemblyDofReport analyzeAssemblyDof(const Assembly& assembly);
 
+// One real BOM/parts-list row: a distinct component name and how many
+// placed components share it (an assembly commonly has several instances
+// of the same imported part -- e.g. 4 identical bolts -- and a real parts
+// list counts them once each, not once per instance).
+struct PartsListEntry {
+    std::string name;
+    int quantity = 0;
+};
+
+// Groups assembly's components by name (exact match, case-sensitive; an
+// empty name groups with every other empty-named component, since
+// there's nothing else to distinguish them by), in first-appearance
+// order -- the same "encounter order, not sorted" convention a real BOM
+// table usually keeps rather than an arbitrary alphabetical resort.
+std::vector<PartsListEntry> buildPartsList(const Assembly& assembly);
+
 // Every component's own shape transformed by its CURRENT world placement
 // (call Assembly::solve() first if mates haven't been solved yet) --
 // parallel to assembly.components(), with a null entry wherever that

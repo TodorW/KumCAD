@@ -14,6 +14,8 @@ add_library(lcad_core STATIC
     geometry/DonutOps.cpp
     geometry/RegionBuild.h
     geometry/RegionBuild.cpp
+    geometry/MassProps.h
+    geometry/MassProps.cpp
     geometry/Circle.h
     geometry/Circle.cpp
     geometry/Arc.h

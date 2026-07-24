@@ -23,6 +23,7 @@ add_executable(lcad_core_tests
     DonutOpsTests.cpp
     RegionBuildTests.cpp
     DocumentExtractTests.cpp
+    MassPropsTests.cpp
     ExprTests.cpp
     ScriptTests.cpp
     LispTests.cpp

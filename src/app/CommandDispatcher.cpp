@@ -19,6 +19,7 @@
 #include "commands/DonutCommand.h"
 #include "commands/WBlockCommand.h"
 #include "commands/ListCommand.h"
+#include "core/geometry/MassProps.h"
 #include "core/geometry/Region.h"
 #include "core/geometry/RegionBuild.h"
 #include "commands/CopyCommand.h"
@@ -454,6 +455,44 @@ void CommandDispatcher::handleCommandText(const QString& text) {
             for (lcad::EntityId id : ids) {
                 for (const QString& line : formatEntityList(m_document, id)) m_commandLine.appendLine(line);
             }
+        }
+    } else if (cmd == QLatin1String("MASSPROP")) {
+        // Real AutoCAD MASSPROP: area/perimeter/centroid/bounding box for
+        // each selected closed curve (closed Polyline, Circle -- via
+        // RegionBuild.h's own tessellation -- or a real multi-loop Region).
+        const std::vector<lcad::EntityId> ids = selectionForModify();
+        if (ids.empty()) {
+            m_commandLine.appendLine(QStringLiteral("*Select one or more closed curves first, then run MASSPROP*"));
+        }
+        for (lcad::EntityId id : ids) {
+            const lcad::Entity* e = m_document.findEntity(id);
+            if (!e) continue;
+
+            std::vector<std::vector<lcad::Point2D>> loops;
+            if (e->type() == lcad::EntityType::Region) {
+                const auto& region = static_cast<const lcad::RegionEntity&>(*e);
+                for (const lcad::RegionLoop& loop : region.loops()) loops.push_back(loop.vertices);
+            } else if (const auto loop = lcad::closedCurveToRegionLoop(*e)) {
+                loops.push_back(*loop);
+            }
+
+            if (loops.empty()) {
+                m_commandLine.appendLine(QStringLiteral("*#%1: not a closed region -- skipped*").arg(id));
+                continue;
+            }
+            const lcad::RegionMassProps props = lcad::computeRegionMassProps(loops);
+            m_commandLine.appendLine(QStringLiteral("*#%1  Area=%2  Perimeter=%3*")
+                                         .arg(id)
+                                         .arg(props.area, 0, 'f', 4)
+                                         .arg(props.perimeter, 0, 'f', 4));
+            m_commandLine.appendLine(QStringLiteral("  Centroid: (%1, %2)")
+                                         .arg(props.centroid.x, 0, 'f', 4)
+                                         .arg(props.centroid.y, 0, 'f', 4));
+            m_commandLine.appendLine(QStringLiteral("  Bounding box: (%1, %2) to (%3, %4)")
+                                         .arg(props.boundingBox.min.x, 0, 'f', 4)
+                                         .arg(props.boundingBox.min.y, 0, 'f', 4)
+                                         .arg(props.boundingBox.max.x, 0, 'f', 4)
+                                         .arg(props.boundingBox.max.y, 0, 'f', 4));
         }
     } else if (cmd == QLatin1String("DBLIST")) {
         for (const lcad::Entity* e : m_document.entities()) {

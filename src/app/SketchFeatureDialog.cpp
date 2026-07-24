@@ -51,6 +51,7 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     m_typeCombo->addItem(QStringLiteral("Draft"), static_cast<int>(FeatureType::Draft));
     m_typeCombo->addItem(QStringLiteral("Hole"), static_cast<int>(FeatureType::Hole));
     m_typeCombo->addItem(QStringLiteral("Slice"), static_cast<int>(FeatureType::Slice));
+    m_typeCombo->addItem(QStringLiteral("PressPull"), static_cast<int>(FeatureType::PressPull));
     form->addRow(QStringLiteral("Type:"), m_typeCombo);
     connect(m_typeCombo, &QComboBox::currentIndexChanged, this, &SketchFeatureDialog::updateHint);
 
@@ -81,7 +82,8 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
     form->addRow(QString(), m_cutModeCheck);
 
     m_p1Spin = makeSpin(-1e6, 1e6, 10.0);
-    form->addRow(QStringLiteral("Height / Angle° / Radius / Spacing / Hole Diameter:"), m_p1Spin);
+    form->addRow(QStringLiteral("Height / Angle° / Radius / Spacing / Hole Diameter / PressPull Signed Distance:"),
+                m_p1Spin);
 
     m_p2Spin = makeSpin(-1e6, 1e6, 0.0);
     form->addRow(QStringLiteral("Hole Depth:"), m_p2Spin);
@@ -204,7 +206,8 @@ SketchFeatureDialog::SketchFeatureDialog(const lcad::Document3D& document, QWidg
 
     m_faceIndices = new QLineEdit(this);
     m_faceIndices->setPlaceholderText(QStringLiteral("required -- which face(s) to open, see Pick3D.h's pickFace"));
-    form->addRow(QStringLiteral("Shell/Draft Face Indices (comma-separated):"), m_faceIndices);
+    form->addRow(QStringLiteral("Shell/Draft Face Indices (comma-separated) / PressPull Face Index (exactly one):"),
+                m_faceIndices);
 
     m_sketchIndices = new QLineEdit(this);
     m_sketchIndices->setPlaceholderText(QStringLiteral("required, 2+, in order -- e.g. 0,1,2"));
@@ -287,6 +290,13 @@ void SketchFeatureDialog::updateHint() {
         m_hintLabel->setText(QStringLiteral("Slice: cuts Target with the plane through Position with normal "
                                             "Direction, keeping the half the normal points away from -- check Cut "
                                             "Mode to keep the other half instead."));
+        break;
+    case FeatureType::PressPull:
+        m_hintLabel->setText(
+            QStringLiteral("PressPull: extrudes Target's Face Index (exactly one) along its own real outward "
+                          "normal by the signed distance in the Height/.../Signed Distance field -- positive "
+                          "pulls out and adds material, negative pushes in and removes it. Only a planar face "
+                          "can be picked."));
         break;
     default:
         break;

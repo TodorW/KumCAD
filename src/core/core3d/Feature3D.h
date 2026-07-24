@@ -151,6 +151,20 @@ enum class FeatureType {
                    // feature produces exactly one shape in this codebase's
                    // model; slicing again with cutMode flipped recovers the
                    // other half as its own separate feature instead.
+    PressPull,     // real AutoCAD PRESSPULL: extrudes inputA's single
+                   // faceIndices[0] (a planar face only -- same restriction
+                   // planeFromFace itself already has) along its own real
+                   // outward normal by signed distance p1. p1 > 0 pulls
+                   // outward, fusing the swept prism into inputA (adding
+                   // material); p1 < 0 pushes inward, cutting the prism out
+                   // of inputA instead (removing material) -- the sign of
+                   // p1 IS the push/pull direction, no separate cutMode
+                   // flag needed, matching how a real interactive
+                   // PRESSPULL just follows whichever way the cursor drags.
+                   // faceIndices must contain exactly one index (unlike
+                   // Fillet/Chamfer's own "empty means every edge"
+                   // convention -- PRESSPULL always acts on one picked
+                   // face at a time, same as a real interactive session).
 };
 
 struct Feature3D {

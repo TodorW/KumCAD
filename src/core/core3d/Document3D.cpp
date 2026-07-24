@@ -842,6 +842,43 @@ void Document3D::recomputeOne(int index) {
         if (ok) shape = op.Shape();
         break;
     }
+    case FeatureType::PressPull: {
+        if (f.inputA < 0 || f.inputA >= index || !isValid(f.inputA) || std::abs(f.p1) < 1e-9 ||
+            f.faceIndices.size() != 1) {
+            ok = false;
+            break;
+        }
+        const TopoDS_Shape& target = m_shapes[static_cast<std::size_t>(f.inputA)];
+        TopTools_IndexedMapOfShape faceMap;
+        TopExp::MapShapes(target, TopAbs_FACE, faceMap);
+        const std::vector<int> resolved = reresolveIndices(target, f.faceIndices, f.faceFingerprints);
+        if (resolved.size() != 1 || resolved[0] < 0 || resolved[0] >= faceMap.Extent()) {
+            ok = false;
+            break;
+        }
+        const int faceIndex = resolved[0];
+        const auto plane = planeFromFace(target, faceIndex);
+        if (!plane) { // not a planar face -- same restriction planeFromFace itself has
+            ok = false;
+            break;
+        }
+        const TopoDS_Face face = TopoDS::Face(faceMap(faceIndex + 1));
+        const gp_Dir normal(plane->normal.x, plane->normal.y, plane->normal.z);
+        const TopoDS_Shape prism = BRepPrimAPI_MakePrism(face, gp_Vec(normal) * f.p1).Shape();
+        if (f.p1 > 0.0) {
+            // Pulling outward along the face's own outward normal adds material.
+            BRepAlgoAPI_Fuse op(target, prism);
+            ok = op.IsDone();
+            if (ok) shape = op.Shape();
+        } else {
+            // Pushing inward removes material -- cut the prism (which now
+            // extends INTO the solid, since p1 is negative) back out.
+            BRepAlgoAPI_Cut op(target, prism);
+            ok = op.IsDone();
+            if (ok) shape = op.Shape();
+        }
+        break;
+    }
     case FeatureType::LinearPattern:
     case FeatureType::PolarPattern: {
         const double dirMag = std::sqrt(f.dirX * f.dirX + f.dirY * f.dirY + f.dirZ * f.dirZ);

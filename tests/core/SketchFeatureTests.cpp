@@ -267,6 +267,136 @@ TEST_CASE("Document3D Shell with no faceIndices is invalid, not a sealed hollow 
     REQUIRE_FALSE(doc.isValid(shellIdx));
 }
 
+TEST_CASE("Document3D PressPull with a positive distance pulls a face outward, adding exactly the prism volume",
+         "[core3d][presspull][pick]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    // Pick the box's top face (straight down from above), the same
+    // mechanism a viewport click would use.
+    PickRay ray;
+    ray.origin = {5.0, 5.0, 50.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto picked = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(picked.has_value());
+
+    Feature3D pull;
+    pull.type = FeatureType::PressPull;
+    pull.inputA = boxIdx;
+    pull.p1 = 4.0; // pull outward by 4
+    pull.faceIndices = {picked->faceIndex};
+    const int pullIdx = doc.addFeature(pull);
+    REQUIRE(doc.isValid(pullIdx));
+
+    // The top face is exactly 10x10, so pulling it outward by 4 adds
+    // exactly a 10x10x4 prism -- an exact volume, no approximation.
+    const double expected = 10.0 * 10.0 * 10.0 + 10.0 * 10.0 * 4.0;
+    REQUIRE(volumeOf(doc.shapeAt(pullIdx)) == Approx(expected).margin(1e-6));
+
+    Bnd_Box bounds;
+    BRepBndLib::Add(doc.shapeAt(pullIdx), bounds);
+    double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+    bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmax == Approx(14.0).margin(1e-6)); // 10 (box) + 4 (pull) -- outward, not inward
+}
+
+TEST_CASE("Document3D PressPull with a negative distance pushes a face inward, cutting exactly the prism volume",
+         "[core3d][presspull][pick]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+
+    PickRay ray;
+    ray.origin = {5.0, 5.0, 50.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto picked = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(picked.has_value());
+
+    Feature3D push;
+    push.type = FeatureType::PressPull;
+    push.inputA = boxIdx;
+    push.p1 = -3.0; // push inward by 3
+    push.faceIndices = {picked->faceIndex};
+    const int pushIdx = doc.addFeature(push);
+    REQUIRE(doc.isValid(pushIdx));
+
+    const double expected = 10.0 * 10.0 * 10.0 - 10.0 * 10.0 * 3.0;
+    REQUIRE(volumeOf(doc.shapeAt(pushIdx)) == Approx(expected).margin(1e-6));
+
+    Bnd_Box bounds;
+    BRepBndLib::Add(doc.shapeAt(pushIdx), bounds);
+    double xmin = 0, ymin = 0, zmin = 0, xmax = 0, ymax = 0, zmax = 0;
+    bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    REQUIRE(zmax == Approx(7.0).margin(1e-6)); // 10 (box) - 3 (push) -- carved inward
+}
+
+TEST_CASE("Document3D PressPull rejects a missing target, a non-planar face, wrong face count, or zero distance",
+         "[core3d][presspull]") {
+    Document3D doc;
+    Feature3D box;
+    box.type = FeatureType::Box;
+    box.p1 = box.p2 = box.p3 = 10.0;
+    const int boxIdx = doc.addFeature(box);
+    PickRay ray;
+    ray.origin = {5.0, 5.0, 50.0};
+    ray.direction = {0.0, 0.0, -1.0};
+    const auto picked = pickFace(doc.shapeAt(boxIdx), ray);
+    REQUIRE(picked.has_value());
+
+    Feature3D missingTarget;
+    missingTarget.type = FeatureType::PressPull;
+    missingTarget.inputA = -1;
+    missingTarget.p1 = 4.0;
+    missingTarget.faceIndices = {picked->faceIndex};
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(missingTarget)));
+
+    Feature3D noFace;
+    noFace.type = FeatureType::PressPull;
+    noFace.inputA = boxIdx;
+    noFace.p1 = 4.0;
+    // faceIndices left empty -- PressPull always needs exactly one, unlike
+    // Fillet/Chamfer's "empty means every edge" convention.
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(noFace)));
+
+    Feature3D twoFaces;
+    twoFaces.type = FeatureType::PressPull;
+    twoFaces.inputA = boxIdx;
+    twoFaces.p1 = 4.0;
+    twoFaces.faceIndices = {picked->faceIndex, 0};
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(twoFaces)));
+
+    Feature3D zeroDistance;
+    zeroDistance.type = FeatureType::PressPull;
+    zeroDistance.inputA = boxIdx;
+    zeroDistance.p1 = 0.0;
+    zeroDistance.faceIndices = {picked->faceIndex};
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(zeroDistance)));
+
+    // A cylinder's round side face isn't planar -- PressPull can't
+    // extrude a curved face, same restriction planeFromFace itself has.
+    Feature3D cylinder;
+    cylinder.type = FeatureType::Cylinder;
+    cylinder.p1 = 5.0; // radius
+    cylinder.p2 = 10.0; // height
+    const int cylIdx = doc.addFeature(cylinder);
+    PickRay sideRay;
+    sideRay.origin = {50.0, 0.0, 5.0};
+    sideRay.direction = {-1.0, 0.0, 0.0};
+    const auto sidePicked = pickFace(doc.shapeAt(cylIdx), sideRay);
+    REQUIRE(sidePicked.has_value());
+    Feature3D curvedFace;
+    curvedFace.type = FeatureType::PressPull;
+    curvedFace.inputA = cylIdx;
+    curvedFace.p1 = 4.0;
+    curvedFace.faceIndices = {sidePicked->faceIndex};
+    REQUIRE_FALSE(doc.isValid(doc.addFeature(curvedFace)));
+}
+
 TEST_CASE("Document3D Loft between two circles builds a frustum with the exact classical volume",
          "[core3d][loft]") {
     Document3D doc;

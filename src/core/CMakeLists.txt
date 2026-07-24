@@ -46,6 +46,8 @@ add_library(lcad_core STATIC
     geometry/Insert.cpp
     geometry/PolylineOps.h
     geometry/PolylineOps.cpp
+    geometry/JoinOps.h
+    geometry/JoinOps.cpp
     geometry/ModifyOps.h
     geometry/ModifyOps.cpp
     geometry/SnapGeometry.h

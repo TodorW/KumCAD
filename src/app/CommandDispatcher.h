@@ -89,6 +89,7 @@ private:
     // OVERKILL (Express Tools): deletes exact geometric duplicates within
     // the current selection, keeping the first occurrence of each.
     void overkillSelection();
+    void joinSelection();
     // More Express Tools (see core/document/ExpressTools.h): BURST explodes
     // blocks keeping attribute VALUES as text (EXPLODE reverts them to tag
     // placeholders); TXT2MTXT combines selected TEXT into one MTEXT;

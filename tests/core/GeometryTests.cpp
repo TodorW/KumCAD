@@ -8,6 +8,7 @@
 #include "core/geometry/Wipeout.h"
 #include "core/geometry/Image.h"
 #include "core/geometry/Insert.h"
+#include "core/geometry/JoinOps.h"
 #include "core/geometry/PointCloud.h"
 #include "core/geometry/Intersect.h"
 #include "core/geometry/Line.h"
@@ -1074,6 +1075,64 @@ TEST_CASE("joinToPolyline chains lines and arcs into one polyline", "[geometry][
     // Disjoint pieces refuse.
     lcad::LineEntity far(5, 0, lcad::Point2D(100, 100), lcad::Point2D(110, 100));
     REQUIRE(lcad::joinToPolyline(12, 0, {&l1, &far}) == nullptr);
+}
+
+TEST_CASE("joinEntities merges collinear touching or overlapping lines into one Line", "[geometry][join]") {
+    lcad::LineEntity a(1, 0, lcad::Point2D(0, 0), lcad::Point2D(5, 0));
+    lcad::LineEntity b(2, 0, lcad::Point2D(5, 0), lcad::Point2D(10, 0));
+    auto touching = lcad::joinEntities(10, 0, {&a, &b});
+    REQUIRE(touching != nullptr);
+    REQUIRE(touching->type() == lcad::EntityType::Line);
+    const auto& touchingLine = static_cast<const lcad::LineEntity&>(*touching);
+    REQUIRE(touchingLine.start().x == Approx(0.0));
+    REQUIRE(touchingLine.end().x == Approx(10.0));
+
+    // Overlapping (not just touching) collinear lines merge to the union extent.
+    lcad::LineEntity c(3, 0, lcad::Point2D(0, 0), lcad::Point2D(6, 0));
+    lcad::LineEntity d(4, 0, lcad::Point2D(4, 0), lcad::Point2D(10, 0));
+    auto overlapping = lcad::joinEntities(11, 0, {&c, &d});
+    REQUIRE(overlapping != nullptr);
+    const auto& overlapLine = static_cast<const lcad::LineEntity&>(*overlapping);
+    REQUIRE(overlapLine.start().x == Approx(0.0));
+    REQUIRE(overlapLine.end().x == Approx(10.0));
+
+    // A real gap between collinear lines isn't a chain -- refused, same as
+    // joinToPolyline's own disjoint-pieces rule.
+    lcad::LineEntity e(5, 0, lcad::Point2D(0, 0), lcad::Point2D(5, 0));
+    lcad::LineEntity f(6, 0, lcad::Point2D(6, 0), lcad::Point2D(10, 0));
+    REQUIRE(lcad::joinEntities(12, 0, {&e, &f}) == nullptr);
+}
+
+TEST_CASE("joinEntities merges arcs on the same circle into one Arc or a full Circle", "[geometry][join]") {
+    const lcad::Point2D center(0, 0);
+    lcad::ArcEntity q1(1, 0, center, 5.0, 0.0, M_PI / 2);
+    lcad::ArcEntity q2(2, 0, center, 5.0, M_PI / 2, M_PI);
+    auto half = lcad::joinEntities(10, 0, {&q1, &q2});
+    REQUIRE(half != nullptr);
+    REQUIRE(half->type() == lcad::EntityType::Arc);
+    const auto& halfArc = static_cast<const lcad::ArcEntity&>(*half);
+    REQUIRE(halfArc.startAngle() == Approx(0.0));
+    REQUIRE(halfArc.endAngle() == Approx(M_PI));
+
+    // Four quarters chain into a full loop -> a Circle, not an Arc.
+    lcad::ArcEntity q3(3, 0, center, 5.0, M_PI, 3 * M_PI / 2);
+    lcad::ArcEntity q4(4, 0, center, 5.0, 3 * M_PI / 2, 2 * M_PI);
+    auto full = lcad::joinEntities(11, 0, {&q1, &q2, &q3, &q4});
+    REQUIRE(full != nullptr);
+    REQUIRE(full->type() == lcad::EntityType::Circle);
+    const auto& circle = static_cast<const lcad::CircleEntity&>(*full);
+    REQUIRE(circle.center().x == Approx(0.0));
+    REQUIRE(circle.radius() == Approx(5.0));
+}
+
+TEST_CASE("joinEntities falls back to a polyline for a non-collinear line pair", "[geometry][join]") {
+    lcad::LineEntity a(1, 0, lcad::Point2D(0, 0), lcad::Point2D(10, 0));
+    lcad::LineEntity b(2, 0, lcad::Point2D(10, 0), lcad::Point2D(10, 10));
+    auto joined = lcad::joinEntities(10, 0, {&a, &b});
+    REQUIRE(joined != nullptr);
+    REQUIRE(joined->type() == lcad::EntityType::Polyline);
+    const auto& pl = static_cast<const lcad::PolylineEntity&>(*joined);
+    REQUIRE(pl.vertices().size() == 3);
 }
 
 TEST_CASE("revisionCloud resamples a closed boundary into evenly bulged arc segments", "[geometry][revcloud]") {

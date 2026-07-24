@@ -20,6 +20,7 @@
 #include "commands/WBlockCommand.h"
 #include "commands/ListCommand.h"
 #include "commands/DimEditCommand.h"
+#include "core/geometry/JoinOps.h"
 #include "core/geometry/MassProps.h"
 #include "core/geometry/Region.h"
 #include "core/geometry/RegionBuild.h"
@@ -906,6 +907,8 @@ void CommandDispatcher::handleCommandText(const QString& text) {
         explodeSelection();
     } else if (cmd == QLatin1String("OVERKILL") || cmd == QLatin1String("OV")) {
         overkillSelection();
+    } else if (cmd == QLatin1String("JOIN")) {
+        joinSelection();
     } else if (cmd == QLatin1String("TCASE")) {
         const std::vector<lcad::EntityId> ids = selectionForModify();
         if (!ids.empty()) startCommand(std::make_unique<TCaseCommand>(m_document, ids), QStringLiteral("TCASE"));
@@ -1354,6 +1357,37 @@ void CommandDispatcher::overkillSelection() {
     }
     m_document.commandStack().execute(std::move(batch));
     m_commandLine.appendLine(QStringLiteral("*%1 duplicate(s) removed*").arg(duplicateIndices.size()));
+    emit documentChanged();
+}
+
+void CommandDispatcher::joinSelection() {
+    const std::vector<lcad::EntityId> ids = selectionForModify();
+    if (ids.size() < 2) {
+        m_commandLine.appendLine(QStringLiteral("*Select 2 or more objects to join*"));
+        return;
+    }
+
+    std::vector<const lcad::Entity*> parts;
+    parts.reserve(ids.size());
+    for (lcad::EntityId id : ids) {
+        if (const lcad::Entity* e = m_document.findEntity(id)) parts.push_back(e);
+    }
+    if (parts.size() < 2) return;
+
+    auto joined = lcad::joinEntities(m_document.reserveEntityId(), parts.front()->layer(), parts, 1e-6);
+    if (!joined) {
+        m_commandLine.appendLine(QStringLiteral("*Selected objects do not form a single connected chain*"));
+        return;
+    }
+
+    auto batch = std::make_unique<lcad::BatchCommand>("Join");
+    for (lcad::EntityId id : ids) {
+        if (m_document.findEntity(id)) batch->add(std::make_unique<lcad::DeleteEntityCommand>(m_document, id));
+    }
+    const int count = static_cast<int>(parts.size());
+    batch->add(std::make_unique<lcad::AddEntityCommand>(m_document, std::move(joined)));
+    m_document.commandStack().execute(std::move(batch));
+    m_commandLine.appendLine(QStringLiteral("*%1 objects joined*").arg(count));
     emit documentChanged();
 }
 

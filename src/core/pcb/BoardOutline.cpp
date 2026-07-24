@@ -200,10 +200,30 @@ std::vector<Point2D> deriveBoardOutline(const Document& doc, const std::string& 
 
 std::vector<KeepoutZone> deriveKeepoutZones(const Document& doc, const std::string& layerName, double chainTolerance) {
     std::vector<KeepoutZone> zones;
-    for (auto& loop : deriveAllClosedLoops(doc, layerName, chainTolerance)) {
-        KeepoutZone zone;
-        zone.polygon = std::move(loop);
-        zones.push_back(std::move(zone));
+    // layerName itself blocks both (real KiCad's default keepout area);
+    // the two reserved suffixes below let a zone restrict itself to just
+    // one restriction, matching real KiCad's own separate "no copper
+    // pour"/"no tracks or vias" checkboxes -- still no single-layer
+    // restriction exposed this way (see this function's own header
+    // comment), only the pour/route split.
+    struct Suffix {
+        std::string name;
+        bool blocksCopperPour;
+        bool blocksAutorouting;
+    };
+    const Suffix suffixes[] = {
+        {layerName, true, true},
+        {layerName + ".NoPour", true, false},
+        {layerName + ".NoRoute", false, true},
+    };
+    for (const Suffix& suffix : suffixes) {
+        for (auto& loop : deriveAllClosedLoops(doc, suffix.name, chainTolerance)) {
+            KeepoutZone zone;
+            zone.polygon = std::move(loop);
+            zone.blocksCopperPour = suffix.blocksCopperPour;
+            zone.blocksAutorouting = suffix.blocksAutorouting;
+            zones.push_back(std::move(zone));
+        }
     }
     return zones;
 }

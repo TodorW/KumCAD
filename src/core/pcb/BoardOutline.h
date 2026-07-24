@@ -60,14 +60,20 @@ struct KeepoutZone {
 // a reserved layer name matching how deriveBoardOutline above already
 // treats "Edge.Cuts" -- a real keepout area drawn as ordinary closed
 // Polyline/Line+Arc geometry, no dedicated entity type needed) into one
-// KeepoutZone per loop. Unlike deriveBoardOutline, every closed loop found
-// becomes its own zone rather than just the largest -- a board can have
-// several independent keepout areas. Each zone applies to every layer
-// (layer left nullopt) and blocks both copper pour and autorouting -- a
-// real, disclosed simplification: this codebase doesn't expose a way to
-// draw a route-only or pour-only or single-layer keepout, unlike
-// KeepoutZone's own per-zone flags, which still work correctly for a
-// caller that builds zones some other way (e.g. a test).
+// KeepoutZone per loop, blocking both copper pour and autorouting. ALSO
+// scans layerName + ".NoPour" (blocks copper pour only) and layerName +
+// ".NoRoute" (blocks autorouting only) the same way, matching real
+// KiCad's own separate "no copper pour"/"no tracks or vias" checkboxes on
+// a rule area -- so drawing a keepout loop on "Keepout.NoRoute" instead
+// of plain "Keepout" gets you a route-only restriction, no dedicated UI
+// needed for that split either. Unlike deriveBoardOutline, every closed
+// loop found on any of the 3 layers becomes its own zone rather than just
+// the largest -- a board can have several independent keepout areas.
+// Every zone applies to every layer (layer left nullopt) -- a real,
+// disclosed remaining simplification: this drawing-based convention still
+// doesn't expose a way to restrict a zone to one specific copper layer,
+// unlike KeepoutZone's own per-zone layer field, which still works
+// correctly for a caller that builds zones some other way (e.g. a test).
 std::vector<KeepoutZone> deriveKeepoutZones(const Document& doc, const std::string& layerName = "Keepout",
                                             double chainTolerance = 1e-6);
 

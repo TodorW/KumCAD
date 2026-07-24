@@ -144,6 +144,29 @@ TEST_CASE("deriveKeepoutZones drawn on the Keepout layer really excludes copper 
     REQUIRE(totalHatchArea(doc) == Approx(20.0 * 10.0 - 10.0 * 6.0).margin(1.0));
 }
 
+TEST_CASE("deriveKeepoutZones' Keepout.NoRoute area doesn't exclude copper from a pour end-to-end",
+         "[pcb][pour][keepout]") {
+    Document doc;
+    const LayerId layer = doc.addLayer("F.Cu", Color{200, 100, 0});
+    const std::vector<Point2D> boundary = {{0, 0}, {20, 0}, {20, 10}, {0, 10}};
+
+    // Drawn on Keepout.NoRoute instead of plain Keepout -- a routing-only
+    // restriction, so a copper pour should ignore it entirely.
+    const LayerId routeOnlyLayer = doc.addLayer("Keepout.NoRoute", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), routeOnlyLayer, std::vector<Point2D>{{5, 2}, {15, 2}, {15, 8}, {5, 8}}, true));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 1);
+    REQUIRE_FALSE(zones[0].blocksCopperPour);
+    REQUIRE(zones[0].blocksAutorouting);
+
+    const auto ids = buildCopperPourWithClearance(doc, layer, boundary, {}, 0.5, 0.0, {}, zones);
+    REQUIRE_FALSE(ids.empty());
+    // A full, unobstructed fill -- the route-only zone left no mark on the pour.
+    REQUIRE(totalHatchArea(doc) == Approx(20.0 * 10.0).margin(1.0));
+}
+
 TEST_CASE("buildCopperPourWithClearance ignores a KeepoutZone with blocksCopperPour disabled", "[pcb][pour][keepout]") {
     Document doc;
     const LayerId layer = doc.addLayer("F.Cu", Color{200, 100, 0});

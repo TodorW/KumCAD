@@ -149,6 +149,36 @@ TEST_CASE("deriveKeepoutZones returns one zone per independent closed loop on th
     REQUIRE(totalArea == Approx(10.0 * 10.0 + 6.0 * 4.0).margin(1e-6));
 }
 
+TEST_CASE("deriveKeepoutZones reads Keepout.NoPour/Keepout.NoRoute as pour-only/route-only restrictions",
+         "[pcb][boardoutline][keepout]") {
+    Document doc;
+    const LayerId both = doc.addLayer("Keepout", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), both, std::vector<Point2D>{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, true));
+
+    const LayerId pourOnly = doc.addLayer("Keepout.NoPour", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), pourOnly, std::vector<Point2D>{{20, 0}, {30, 0}, {30, 10}, {20, 10}}, true));
+
+    const LayerId routeOnly = doc.addLayer("Keepout.NoRoute", Color{255, 0, 255});
+    doc.addEntity(std::make_unique<PolylineEntity>(
+        doc.reserveEntityId(), routeOnly, std::vector<Point2D>{{40, 0}, {50, 0}, {50, 10}, {40, 10}}, true));
+
+    const auto zones = deriveKeepoutZones(doc);
+    REQUIRE(zones.size() == 3);
+
+    int foundBoth = 0, foundPourOnly = 0, foundRouteOnly = 0;
+    for (const auto& zone : zones) {
+        if (zone.blocksCopperPour && zone.blocksAutorouting) ++foundBoth;
+        else if (zone.blocksCopperPour && !zone.blocksAutorouting) ++foundPourOnly;
+        else if (!zone.blocksCopperPour && zone.blocksAutorouting) ++foundRouteOnly;
+        REQUIRE_FALSE(zone.layer.has_value()); // still no per-zone single-layer restriction this way
+    }
+    REQUIRE(foundBoth == 1);
+    REQUIRE(foundPourOnly == 1);
+    REQUIRE(foundRouteOnly == 1);
+}
+
 TEST_CASE("deriveKeepoutZones chains a mixed line+arc loop the same way deriveBoardOutline does",
          "[pcb][boardoutline][keepout]") {
     Document doc;
